@@ -1,24 +1,9 @@
 import random
 import json
-
-# ===============================
-# Configuration
-# ===============================
-
-N_SAMPLES = 100_000
-MIN_LEN = 4
-MAX_LEN = 80
-
-BRACKETS = ["(", "[", "{", "<"]
-PAIRS = {
-    "(": ")",
-    "[": "]",
-    "{": "}",
-    "<": ">"
-}
-
-OUTPUT_PATH = "dyck_prompt_response_chat_reasoning.jsonl"
-SEED = 42
+from config import (
+    N_SAMPLES, MIN_LEN, MAX_LEN, BRACKETS, PAIRS,
+    OUTPUT_PATH, SEED
+)
 
 random.seed(SEED)
 

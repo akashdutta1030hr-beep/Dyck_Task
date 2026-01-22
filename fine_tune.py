@@ -2,18 +2,12 @@ from transformers import Trainer, TrainingArguments, AutoTokenizer, AutoModelFor
 from datasets import Dataset
 import json
 import os
-
-# ===============================
-# Configuration
-# ===============================
-MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
-OUTPUT_DIR = "./output"  # where to save the fine-tuned model
-TRAIN_FILE = "dyck_prompt_response_chat_reasoning.jsonl"  # path to your dataset
-NUM_TRAINING_STEPS = 4000  # Fine-tuning steps (adjust based on dataset size)
-BATCH_SIZE = 8  # Change based on VRAM availability
-LR = 1.5e-5  # Learning rate, adjust if necessary
-EPOCHS = 1  # Training for 1 epoch as reasoning models tend to overfit fast
-WARMUP_STEPS = 200  # Learning rate warmup steps
+from config import (
+    MODEL_NAME, OUTPUT_DIR, TRAIN_FILE, NUM_TRAINING_STEPS,
+    BATCH_SIZE, LR, EPOCHS, WARMUP_STEPS, GRADIENT_ACCUMULATION_STEPS,
+    WEIGHT_DECAY, MAX_LENGTH, SAVE_STEPS, SAVE_TOTAL_LIMIT,
+    LOGGING_STEPS, USE_FP16, OPTIMIZER
+)
 
 # ===============================
 # Load the dataset
@@ -39,7 +33,7 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
 # Tokenize the dataset
 def tokenize_function(examples):
-    return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=512)
+    return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=MAX_LENGTH)
 
 train_dataset = train_dataset.map(tokenize_function, batched=True)
 
@@ -57,18 +51,18 @@ training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,  # Where to save the model
     num_train_epochs=EPOCHS,  # Number of epochs
     per_device_train_batch_size=BATCH_SIZE,  # Batch size per device
-    gradient_accumulation_steps=16,  # To simulate larger batch size
+    gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,  # To simulate larger batch size
     learning_rate=LR,  # Learning rate
     warmup_steps=WARMUP_STEPS,  # Warmup steps for LR scheduler
-    weight_decay=0.1,  # Weight decay for optimizer
+    weight_decay=WEIGHT_DECAY,  # Weight decay for optimizer
     logging_dir='./logs',  # Log directory
-    logging_steps=200,  # Log every 200 steps
-    save_steps=500,  # Save the model every 500 steps
-    save_total_limit=2,  # Save only the last 2 models
-    fp16=True,  # Mixed precision
+    logging_steps=LOGGING_STEPS,  # Log every N steps
+    save_steps=SAVE_STEPS,  # Save the model every N steps
+    save_total_limit=SAVE_TOTAL_LIMIT,  # Save only the last N models
+    fp16=USE_FP16,  # Mixed precision
     evaluation_strategy="no",  # No evaluation during training
     load_best_model_at_end=False,  # Do not load the best model at the end
-    optim="adamw_torch",  # Use AdamW optimizer
+    optim=OPTIMIZER,  # Optimizer type
 )
 
 # ===============================
