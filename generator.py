@@ -1,111 +1,121 @@
 import random
 import json
 
-# -----------------------------
-# Bracket configuration
-# -----------------------------
-OPEN_TO_CLOSE = {
+# ===============================
+# Configuration
+# ===============================
+
+N_SAMPLES = 100_000
+MIN_LEN = 4
+MAX_LEN = 80
+
+BRACKETS = ["(", "[", "{", "<"]
+PAIRS = {
     "(": ")",
     "[": "]",
     "{": "}",
     "<": ">"
 }
-OPENING = list(OPEN_TO_CLOSE.keys())
 
-# -----------------------------
-# Generate a valid Dyck sequence
-# -----------------------------
-def generate_dyck_sequence(max_depth=5, max_length=40):
-    stack = []
-    sequence = []
+OUTPUT_PATH = "dyck_prompt_response_chat_reasoning.jsonl"
+SEED = 42
 
-    while len(sequence) < max_length:
-        # Decide to open or close
-        if not stack or (len(stack) < max_depth and random.random() < 0.6):
-            op = random.choice(OPENING)
-            stack.append(op)
-            sequence.append(op)
-        else:
-            sequence.append(OPEN_TO_CLOSE[stack.pop()])
+random.seed(SEED)
 
-    # Close remaining
-    while stack:
-        sequence.append(OPEN_TO_CLOSE[stack.pop()])
+# ===============================
+# Dyck sequence generation
+# ===============================
 
-    return "".join(sequence)
+def generate_partial_dyck_sequence(min_len: int, max_len: int) -> str:
+    """
+    Generate a valid partial Dyck sequence consisting only of opening brackets.
+    """
+    length = random.randint(min_len, max_len)
+    return "".join(random.choice(BRACKETS) for _ in range(length))
 
-# -----------------------------
-# Create partial input
-# -----------------------------
-def make_partial(sequence, min_cut=1):
-    cut = random.randint(min_cut, len(sequence) - 1)
-    return sequence[:cut]
 
-# -----------------------------
-# Stack summary after scan
-# -----------------------------
-def compute_stack(sequence):
-    stack = []
-    for ch in sequence:
-        if ch in OPEN_TO_CLOSE:
-            stack.append(ch)
-        else:
-            stack.pop()
-    return stack
+def compute_closing_sequence(seq: str) -> str:
+    """
+    Compute the minimal required closing brackets.
+    """
+    return "".join(PAIRS[ch] for ch in reversed(seq))
 
-# -----------------------------
-# Reasoning template (TEMPLATE 1)
-# -----------------------------
-def make_reasoning(stack):
-    if stack:
-        stack_str = ", ".join(stack)
-    else:
-        stack_str = "(empty)"
+
+# ===============================
+# Reasoning (Stack-Summary)
+# ===============================
+
+def generate_reasoning(seq: str) -> str:
+    unmatched = ", ".join(seq)
+    closing = ", ".join(PAIRS[ch] for ch in reversed(seq))
+
     return (
-        "<think>\n"
-        "Scan the sequence from left to right.\n"
-        "Push unmatched opening brackets onto a stack.\n"
-        f"Remaining stack (bottom to top): {stack_str}\n"
-        "Close brackets in reverse order using matching pairs.\n"
-        "</think>\n"
+        "Use a stack to track unmatched opening brackets.\n"
+        f"Unmatched openings in order: {unmatched}.\n"
+        f"Close them in reverse order: {closing}."
     )
 
-# -----------------------------
-# Build one dataset sample
-# -----------------------------
-def build_sample():
-    full_seq = generate_dyck_sequence()
-    partial = make_partial(full_seq)
 
-    stack = compute_stack(partial)
-    closing = "".join(OPEN_TO_CLOSE[ch] for ch in reversed(stack))
-    completed = partial + closing
+# ===============================
+# Prompt template (USER)
+# ===============================
 
-    reasoning = make_reasoning(stack)
+def build_prompt(seq: str) -> str:
+    return (
+        "Complete the following Dyck language sequence by adding the minimal "
+        "necessary closing brackets.\n\n"
+        f"Sequence: {seq}\n\n"
+        "Rules:\n"
+        "- Add only the required closing brackets\n"
+        "- Do not add extra pairs\n\n"
+        "Provide only the complete valid sequence."
+    )
 
-    return {
-        "prompt": (
-            "Complete the following Dyck language sequence by adding the minimal "
-            "necessary closing brackets.\n\n"
-            f"Sequence: {partial}"
-        ),
-        "response": reasoning + completed
-    }
 
-# -----------------------------
-# Generate dataset
-# -----------------------------
-def generate_dataset(n_samples=1000, output_file="dyck_reasoning_dataset.jsonl"):
-    with open(output_file, "w", encoding="utf-8") as f:
-        for _ in range(n_samples):
-            sample = build_sample()
+# ===============================
+# Response template (ASSISTANT)
+# ===============================
+
+def build_response(seq: str) -> str:
+    closing = compute_closing_sequence(seq)
+    reasoning = generate_reasoning(seq)
+    answer = seq + closing
+
+    return (
+        "<|Assistant|>\n"
+        "<think>\n"
+        f"{reasoning}\n"
+        "</think>\n"
+        f"{answer}\n"
+        "<|EOT|>"
+    )
+
+
+# ===============================
+# Dataset generation
+# ===============================
+
+def generate_dataset(n_samples: int, output_path: str):
+    with open(output_path, "w", encoding="utf-8") as f:
+        for i in range(n_samples):
+            seq = generate_partial_dyck_sequence(MIN_LEN, MAX_LEN)
+
+            sample = {
+                "prompt": build_prompt(seq),
+                "response": build_response(seq)
+            }
+
             f.write(json.dumps(sample, ensure_ascii=False) + "\n")
 
-    print(f"Generated {n_samples} samples → {output_file}")
+            if (i + 1) % 10_000 == 0:
+                print(f"Generated {i + 1}/{n_samples} samples")
 
-# -----------------------------
-# Run
-# -----------------------------
+    print(f"\nDataset saved to: {output_path}")
+
+
+# ===============================
+# Main
+# ===============================
+
 if __name__ == "__main__":
-    random.seed(42)
-    generate_dataset(n_samples=100000)
+    generate_dataset(N_SAMPLES, OUTPUT_PATH)
