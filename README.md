@@ -33,6 +33,36 @@ python generator.py
 
 This will generate 100,000 samples and save them to `dyck_prompt_response_chat_reasoning.jsonl`.
 
+### `fine_tune.py`
+Fine-tuning script for training language models on the generated dataset. Uses Hugging Face Transformers to fine-tune a causal language model.
+
+**Configuration constants** (at the top):
+- `MODEL_NAME`: Base model to fine-tune (default: "unsloth/DeepSeek-R1-Distill-Qwen-1.5B")
+- `OUTPUT_DIR`: Directory to save the fine-tuned model (default: "./output")
+- `TRAIN_FILE`: Path to the training dataset (default: "dyck_prompt_response_chat_reasoning.jsonl")
+- `NUM_TRAINING_STEPS`: Number of training steps (default: 4000)
+- `BATCH_SIZE`: Training batch size per device (default: 8)
+- `LR`: Learning rate (default: 1.5e-5)
+- `EPOCHS`: Number of training epochs (default: 1)
+- `WARMUP_STEPS`: Learning rate warmup steps (default: 200)
+
+**Features:**
+- Automatic dataset loading from JSONL
+- Tokenization with max length 512
+- Mixed precision training (FP16)
+- Gradient accumulation for effective larger batch sizes
+- Automatic model and tokenizer saving
+
+**Usage:**
+```bash
+python fine_tune.py
+```
+
+**Note:** Before running, ensure you have installed the required dependencies:
+```bash
+pip install transformers datasets torch
+```
+
 ### `run.sh`
 Bash script wrapper for running the dataset generation. Automatically detects and uses the available Python interpreter (python3 or python).
 
@@ -87,8 +117,25 @@ The generator supports 4 bracket types:
 
 ## Requirements
 
+### For Dataset Generation
 - Python 3.x
 - Standard library only (no external dependencies)
+
+### For Fine-tuning
+- Python 3.8+
+- PyTorch
+- transformers
+- datasets
+
+Install fine-tuning dependencies:
+```bash
+pip install transformers datasets torch
+```
+
+For GPU acceleration (recommended):
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
 
 ## Customization
 
@@ -108,12 +155,67 @@ from generator import generate_dataset
 generate_dataset(n_samples=1000, output_file="my_dataset.jsonl")
 ```
 
+## Fine-tuning
+
+### Quick Start
+
+1. **Generate the dataset:**
+   ```bash
+   python generator.py
+   ```
+
+2. **Fine-tune the model:**
+   ```bash
+   python fine_tune.py
+   ```
+
+### Dataset Format for Fine-tuning
+
+**Note:** The `fine_tune.py` script expects the dataset to have a `text` field. If your dataset uses `prompt` and `response` fields, you'll need to combine them into a single `text` field or modify the script accordingly.
+
+### Fine-tuning Configuration
+
+Edit the configuration constants in `fine_tune.py` to customize training:
+
+- **Model selection**: Change `MODEL_NAME` to use a different base model
+- **Training steps**: Adjust `NUM_TRAINING_STEPS` based on dataset size
+- **Batch size**: Modify `BATCH_SIZE` based on available VRAM (reduce if OOM errors occur)
+- **Learning rate**: Tune `LR` for optimal convergence (typically 1e-5 to 5e-5)
+- **Output directory**: Change `OUTPUT_DIR` to save models elsewhere
+
+### Training Parameters
+
+The default training configuration uses:
+- **1 epoch**: Reasoning models tend to overfit quickly
+- **Gradient accumulation**: 16 steps to simulate larger batch size
+- **Mixed precision**: FP16 for faster training and lower memory usage
+- **AdamW optimizer**: With weight decay 0.1
+- **Checkpointing**: Saves model every 500 steps (keeps last 2 checkpoints)
+
+### Model Output
+
+After training, the fine-tuned model will be saved in `OUTPUT_DIR` with:
+- Model weights (`pytorch_model.bin` or `model.safetensors`)
+- Tokenizer files (`tokenizer.json`, `tokenizer_config.json`, etc.)
+- Configuration files (`config.json`)
+
+### Loading the Fine-tuned Model
+
+```python
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+model_path = "./output"  # or your OUTPUT_DIR
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+model = AutoModelForCausalLM.from_pretrained(model_path)
+```
+
 ## Key Features
 
 - **Stack-based reasoning**: Each response includes explicit reasoning about unmatched brackets
 - **Chat format**: Responses use `<|Assistant|>` tags and `</think>` markers for structured output
 - **Configurable**: Easy to adjust sample count, sequence lengths, and output file
 - **Reproducible**: Fixed random seed ensures consistent dataset generation
+- **Fine-tuning ready**: Complete fine-tuning script included for training reasoning models
 
 ## License
 
