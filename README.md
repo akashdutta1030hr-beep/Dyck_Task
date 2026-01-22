@@ -186,6 +186,24 @@ The Dyck setup uses four bracket pairs:
 
 ---
 
+## Repository
+
+**GitHub:** [https://github.com/akashdutta1030hr-beep/Reasoning-Model](https://github.com/akashdutta1030hr-beep/Reasoning-Model)
+
+### Pushing changes
+
+Commit and push from your machine (authenticate with GitHub via SSH or a personal access token):
+
+```bash
+git add .
+git commit -m "Your message"
+git push -u origin update-dataset   # or main
+```
+
+**Note:** `dyck_language_with_reasoning_dataset.json` is in `.gitignore` (>100MB); generate it locally with `python generator.py` or host it elsewhere (e.g. Hugging Face Datasets).
+
+---
+
 ## License
 
 This project is provided as-is for research and education.
