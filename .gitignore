@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dataset (too large for GitHub; >100MB limit)
+dyck_language_with_reasoning_dataset.json
+
+# Optional: legacy JSONL if you generate it
+# dyck_prompt_response_chat_reasoning.jsonl
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~
+
+# Training outputs
+results/
+output/

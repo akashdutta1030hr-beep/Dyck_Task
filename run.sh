@@ -15,4 +15,4 @@ if ! command -v "$PY_BIN" >/dev/null 2>&1; then
 fi
 
 echo "Running dataset generation with ${PY_BIN}..."
-"$PY_BIN" dataset_generation.py
+"$PY_BIN" generator.py
