@@ -9,6 +9,12 @@ __pycache__/
 dist/
 build/
 
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
 # Jupyter
 .ipynb_checkpoints/
 

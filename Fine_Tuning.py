@@ -7,7 +7,7 @@ fields; each item has "messages": [system, user, assistant]. We derive:
   - prompt  = user message "content"
   - response = assistant message "content"
 
-Note: Before running, install: pip install transformers datasets torch
+Note: Before running, install: pip install transformers datasets torch "accelerate>=0.26.0"
 """
 
 import json
@@ -21,6 +21,17 @@ MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TRAIN_FILE = os.path.join(SCRIPT_DIR, "dyck_language_with_reasoning_dataset.json")
 MAX_LENGTH = 512  # Maximum sequence length
+
+# Device: use bf16 on GPU if available, else fp32 on CPU
+USE_CUDA = torch.cuda.is_available()
+USE_BF16 = False
+if USE_CUDA:
+    try:
+        USE_BF16 = torch.cuda.is_bf16_supported()
+    except Exception:
+        pass
+DTYPE = torch.bfloat16 if USE_BF16 else torch.float32
+print(f"Device: {'GPU (CUDA)' if USE_CUDA else 'CPU'} | bf16: {USE_BF16} | dtype: {DTYPE}")
 
 
 def load_from_messages(file_path: str):
@@ -92,7 +103,7 @@ print(f"Number of features in tokenized dataset: {len(tokenized_train_dataset.co
 print(f"\nLoading model from {MODEL_NAME}...")
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
-    torch_dtype=torch.bfloat16,  # Use bfloat16 for memory/performance benefits
+    torch_dtype=DTYPE,
 )
 
 # Print the model to verify its architecture
@@ -111,14 +122,15 @@ training_args = TrainingArguments(
     adam_beta2=0.95,
     lr_scheduler_type='cosine',
     warmup_ratio=0.03,
-    bf16=True,  # Changed from fp16=True to bf16=True
-    gradient_checkpointing=True,
+    bf16=USE_BF16,
+    fp16=False,
+    gradient_checkpointing=USE_CUDA,
     logging_steps=1,
     save_steps=100,
-    output_dir='./results',
+    output_dir='./output',
     overwrite_output_dir=True,
     seed=42,
-    report_to='none'  # Disable wandb reporting
+    report_to='none',
 )
 
 print("Training arguments:")
@@ -138,3 +150,15 @@ print("\nStarting training...")
 trainer.train()
 
 print("\nTraining complete.")
+
+loss = trainer.state.loss
+print(f"Training loss: {loss}")
+
+save_path = "./output"
+model.save_pretrained(save_path)
+tokenizer.save_pretrained(save_path)
+print(f"Model saved to {save_path}")
+
+
+
+

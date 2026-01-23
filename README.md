@@ -124,19 +124,6 @@ The script:
   The dataset’s assistant `content` already starts with `<|Assistant|><think>...`, so the script does **not** add an extra `<|Assistant|>` before the response.
 - Fine-tunes **`unsloth/DeepSeek-R1-Distill-Qwen-1.5B`** (configurable at top of script).
 
-### Dependencies
-
-```bash
-pip install transformers datasets torch
-```
-
-### Usage
-
-```bash
-python Fine_Tuning.py
-```
-
-Ensure `dyck_language_with_reasoning_dataset.json` exists in the project root (or adjust `TRAIN_FILE` / paths in the script).
 
 ### Main configuration (in `Fine_Tuning.py`)
 
@@ -179,28 +166,10 @@ The Dyck setup uses four bracket pairs:
 
 2. **Fine-tune**
    ```bash
-   pip install transformers datasets torch
+   pip install transformers datasets torch "accelerate>=0.26.0"
    python Fine_Tuning.py
    ```
    → reads `dyck_language_with_reasoning_dataset.json`, trains, writes checkpoints to `./results`.
-
----
-
-## Repository
-
-**GitHub:** [https://github.com/akashdutta1030hr-beep/Reasoning-Model](https://github.com/akashdutta1030hr-beep/Reasoning-Model)
-
-### Pushing changes
-
-Commit and push from your machine (authenticate with GitHub via SSH or a personal access token):
-
-```bash
-git add .
-git commit -m "Your message"
-git push -u origin update-dataset   # or main
-```
-
-**Note:** `dyck_language_with_reasoning_dataset.json` is in `.gitignore` (>100MB); generate it locally with `python generator.py` or host it elsewhere (e.g. Hugging Face Datasets).
 
 ---
 

@@ -2,6 +2,7 @@ from data.dataset_generator import generate_dyck_dataset
 from data.file_utils import save_dataset_to_file
 import random
 
+
 # Set the seed for reproducibility
 random.seed(42)
 
