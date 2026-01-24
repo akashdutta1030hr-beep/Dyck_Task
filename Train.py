@@ -1,164 +1,113 @@
-"""
-Fine-tuning script for DeepSeek-R1-Distill-Qwen-1.5B model
-Converted from Fine_Tuning.ipynb
+# Install required packages
+# !pip install -U unsloth transformers datasets accelerate bitsandbytes sentencepiece
 
-Uses dyck_language_with_reasoning_dataset.json. The JSON has no "prompt" or "response"
-fields; each item has "messages": [system, user, assistant]. We derive:
-  - prompt  = user message "content"
-  - response = assistant message "content"
-
-Note: Before running, install: pip install transformers datasets torch "accelerate>=0.26.0"
-"""
-
-import json
-import os
 import torch
-from datasets import Dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from datasets import load_dataset
+from Train.preprocess import preprocess
+from unsloth import FastLanguageModel
+from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
 
-# Configuration
+# Constants
 MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TRAIN_FILE = os.path.join(SCRIPT_DIR, "dyck_language_with_reasoning_dataset.json")
-MAX_LENGTH = 512  # Maximum sequence length
+DATA_PATH = "/content/dyck_language_with_reasoning_dataset.json"
+OUTPUT_DIR = "/content/results"
+MAX_LENGTH = 512
 
-# Device: use bf16 on GPU if available, else fp32 on CPU
-USE_CUDA = torch.cuda.is_available()
-USE_BF16 = False
-if USE_CUDA:
-    try:
-        USE_BF16 = torch.cuda.is_bf16_supported()
-    except Exception:
-        pass
-DTYPE = torch.bfloat16 if USE_BF16 else torch.float32
-print(f"Device: {'GPU (CUDA)' if USE_CUDA else 'CPU'} | bf16: {USE_BF16} | dtype: {DTYPE}")
-
-
-def load_from_messages(file_path: str):
-    """
-    Load dyck_language_with_reasoning_dataset.json. The file has no 'prompt' or 'response'
-    keys; only 'messages' with role/content. We derive prompt from user, response from assistant.
-    """
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    prompts = []
-    responses = []
-    for entry in data:
-        messages = entry.get("messages", [])
-        if len(messages) < 2:
-            continue
-        user_msg = next((m for m in messages if m.get("role") == "user"), None)
-        assistant_msg = next((m for m in messages if m.get("role") == "assistant"), None)
-        if user_msg is None or assistant_msg is None:
-            continue
-        prompts.append(user_msg.get("content", ""))
-        responses.append(assistant_msg.get("content", ""))
-    return prompts, responses
-
-
-# Load the dataset (prompt/response derived from messages)
-print("Loading dataset...")
-if not os.path.isfile(TRAIN_FILE):
-    raise FileNotFoundError(f"Dataset not found: {TRAIN_FILE}")
-prompts, responses = load_from_messages(TRAIN_FILE)
-print(f"Loaded {len(prompts)} examples from dyck_language_with_reasoning_dataset.json")
-
-# Build HuggingFace Dataset with derived 'prompt' and 'response'
-train_dataset = Dataset.from_dict({"prompt": prompts, "response": responses})
-
-# Check the first few examples to confirm it loaded correctly
-print("Dataset loaded. First 5 examples:")
-print(train_dataset[:5])
-
-# Load the tokenizer for your model
-print(f"\nLoading tokenizer from {MODEL_NAME}...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-def preprocess_function(examples):
-    # Format: <|User|>\n{prompt}\n{response}{eos}
-    # Dataset assistant "content" already starts with <|Assistant|><think>...; do not add extra <|Assistant|>.
-    formatted_texts = [f"<|User|>\n{p}\n{r}{tokenizer.eos_token}" for p, r in zip(examples['prompt'], examples['response'])]
-
-    # Tokenize the combined texts
-    tokenized_inputs = tokenizer(formatted_texts,
-                                 max_length=MAX_LENGTH,
-                                 truncation=True,
-                                 padding='max_length')  # Ensure padding to max_length for consistent input size
-
-    # Set input_ids as labels for language modeling tasks
-    tokenized_inputs['labels'] = tokenized_inputs['input_ids'].copy()
-
-    return tokenized_inputs
-
-# Apply the preprocessing function to the training dataset
-print("\nPreprocessing dataset...")
-tokenized_train_dataset = train_dataset.map(preprocess_function, batched=True, remove_columns=['prompt', 'response'])
-
-# Check the structure of the tokenized dataset
-print("Tokenized dataset structure:")
-print(tokenized_train_dataset[0])
-print(f"Number of features in tokenized dataset: {len(tokenized_train_dataset.column_names)}")
-
-# Load the pre-trained model
-print(f"\nLoading model from {MODEL_NAME}...")
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    torch_dtype=DTYPE,
+# Load pre-trained model and tokenizer
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name=MODEL_NAME,
+    max_seq_length=MAX_LENGTH,
+    dtype=torch.float16,
+    load_in_4bit=True,
 )
 
-# Print the model to verify its architecture
-print("Model loaded:")
-print(model)
+# Ensure the pad token is set (required for Qwen/DeepSeek)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
 
-# Configure training arguments
-print("\nSetting up training arguments...")
+# Add LoRA (Low-Rank Adaptation) to the model
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=16,
+    target_modules=[
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    ],
+    lora_alpha=32,
+    lora_dropout=0.05,
+    bias="none",
+    use_gradient_checkpointing=True,
+    random_state=42,
+)
+
+# Load and preprocess dataset
+dataset = load_dataset("json", data_files=DATA_PATH)["train"]
+dataset = dataset.shuffle(seed=42)
+dataset = dataset.train_test_split(test_size=0.05)
+
+train_dataset = dataset["train"]
+eval_dataset = dataset["test"]
+
+# Print a sample from the dataset to check
+print(train_dataset[0])
+
+
+# Apply preprocessing to train and eval datasets
+train_dataset = train_dataset.map(
+    preprocess,
+    remove_columns=train_dataset.column_names,
+)
+
+eval_dataset = eval_dataset.map(
+    preprocess,
+    remove_columns=eval_dataset.column_names,
+)
+
+# Data Collator for Language Modeling
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False,
+)
+
+# Training arguments
 training_args = TrainingArguments(
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=64,
-    max_steps=4000,
-    learning_rate=1.5e-5,
-    weight_decay=0.1,
-    adam_beta1=0.9,
-    adam_beta2=0.95,
-    lr_scheduler_type='cosine',
+    output_dir=OUTPUT_DIR,
+    evaluation_strategy="steps",
+    eval_steps=500,
+    save_steps=500,
+    logging_steps=100,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
+    gradient_accumulation_steps=8,  # effective batch = 16
+    num_train_epochs=2,
+    learning_rate=5e-5,  # QLoRA LR
     warmup_ratio=0.03,
-    bf16=USE_BF16,
-    fp16=False,
-    gradient_checkpointing=USE_CUDA,
-    logging_steps=1,
-    save_steps=100,
-    output_dir='./output',
-    overwrite_output_dir=True,
-    seed=42,
-    report_to='none',
+    weight_decay=0.01,
+    fp16=True,
+    max_grad_norm=1.0,
+    save_total_limit=2,
+    load_best_model_at_end=True,
+    metric_for_best_model="eval_loss",
+    report_to="none",
 )
 
-print("Training arguments:")
-print(training_args)
-
-# Initialize the Trainer
-print("\nInitializing trainer...")
+# Initialize Trainer
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=tokenized_train_dataset,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
     tokenizer=tokenizer,
+    data_collator=data_collator,
 )
 
 # Start training
-print("\nStarting training...")
 trainer.train()
 
-print("\nTraining complete.")
+# Save final model and tokenizer
+model.save_pretrained("/content/final_lora")
+tokenizer.save_pretrained("/content/final_lora")
 
-loss = trainer.state.loss
-print(f"Training loss: {loss}")
-
-save_path = "./output"
-model.save_pretrained(save_path)
-tokenizer.save_pretrained(save_path)
-print(f"Model saved to {save_path}")
-
-
-
-
+# Evaluate the model
+eval_results = trainer.evaluate()
+print(eval_results)
