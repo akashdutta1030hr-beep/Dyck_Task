@@ -57,7 +57,7 @@ def preprocess(example):
     messages = example["messages"]
     chat_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
     
-    # Tokenize the entire chat text
+    # Tokenize the entire chat text (including reasoning inside <think> tags)
     tokenized = tokenizer(
         chat_text,
         truncation=True,
@@ -68,32 +68,37 @@ def preprocess(example):
     input_ids = tokenized["input_ids"]
     labels = [-100] * len(input_ids)  # Default label is -100 (ignore token)
 
+    # Extract assistant's reasoning and output
     assistant_text = extract_assistant_content(messages)
     if assistant_text == "":
         tokenized["labels"] = labels
         return tokenized
 
-    # Find where the assistant's response starts
+    # Find where the assistant's response starts (including reasoning)
     start_idx = chat_text.find(assistant_text)
     if start_idx == -1:
         tokenized["labels"] = labels
         return tokenized
 
-    prefix = chat_text[:start_idx]
-    prefix_ids = tokenizer(prefix, truncation=True, max_length=MAX_LENGTH)["input_ids"]
+    # Split the assistant's response into reasoning and Dyck sequence
+    reasoning_start = assistant_text.find("<think>")
+    reasoning_end = assistant_text.find("</think>") + len("</think>")
+    reasoning = assistant_text[reasoning_start:reasoning_end]
+    dyck_sequence = assistant_text[reasoning_end:].strip()
 
-    assistant_ids = tokenizer(
-        assistant_text,
-        add_special_tokens=False,
-        truncation=True,
-        max_length=MAX_LENGTH,
-    )["input_ids"]
+    # Tokenize reasoning and Dyck sequence separately
+    reasoning_ids = tokenizer(reasoning, truncation=True, max_length=MAX_LENGTH)["input_ids"]
+    dyck_sequence_ids = tokenizer(dyck_sequence, truncation=True, max_length=MAX_LENGTH)["input_ids"]
+    
+    # Now align labels: Reasoning and Dyck sequence should be part of the labels
+    # First, assign labels for reasoning
+    reasoning_start_idx = len(tokenizer(chat_text[:start_idx], truncation=True, max_length=MAX_LENGTH)["input_ids"])
+    for i in range(reasoning_start_idx, reasoning_start_idx + len(reasoning_ids)):
+        labels[i] = input_ids[i]
 
-    # Label the assistant's response correctly
-    start = len(prefix_ids)
-    end = min(start + len(assistant_ids), len(input_ids))
-
-    for i in range(start, end):
+    # Then, assign labels for Dyck sequence
+    dyck_start_idx = reasoning_start_idx + len(reasoning_ids)
+    for i in range(dyck_start_idx, dyck_start_idx + len(dyck_sequence_ids)):
         labels[i] = input_ids[i]
 
     tokenized["labels"] = labels
