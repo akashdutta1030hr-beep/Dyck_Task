@@ -1,12 +1,10 @@
-# Install required packages
-# !pip install -U unsloth transformers datasets accelerate bitsandbytes sentencepiece
-
 import torch
 from datasets import load_dataset
 from unsloth import FastLanguageModel
 from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
+import matplotlib.pyplot as plt
+from transformers import TrainerCallback, TrainerState
 
-# Constants
 MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 DATA_PATH = "/content/dyck_language_with_reasoning_dataset.json"
 OUTPUT_DIR = "/content/results"
@@ -20,7 +18,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     load_in_4bit=True,
 )
 
-# Ensure the pad token is set (required for Qwen/DeepSeek)
+# Ensure the pad token is set
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -39,7 +37,7 @@ model = FastLanguageModel.get_peft_model(
     random_state=42,
 )
 
-# Load and preprocess dataset
+# Load and shuffle dataset
 dataset = load_dataset("json", data_files=DATA_PATH)["train"]
 dataset = dataset.shuffle(seed=42)
 dataset = dataset.train_test_split(test_size=0.05)
@@ -47,27 +45,19 @@ dataset = dataset.train_test_split(test_size=0.05)
 train_dataset = dataset["train"]
 eval_dataset = dataset["test"]
 
-# Print a sample from the dataset to check
-print(train_dataset[0])
-
-# Function to extract assistant content from messages
+# Helper function to extract assistant's content
 def extract_assistant_content(messages):
     for msg in messages:
         if msg["role"] == "assistant":
             return msg["content"]
     return ""
 
-# Preprocess function to tokenize the dataset
+# Preprocess function: tokenize chat and align labels with assistant's response
 def preprocess(example):
     messages = example["messages"]
+    chat_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
     
-    # Apply chat template for tokenization
-    chat_text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-    )
-    
+    # Tokenize the entire chat text
     tokenized = tokenizer(
         chat_text,
         truncation=True,
@@ -76,30 +66,30 @@ def preprocess(example):
     )
     
     input_ids = tokenized["input_ids"]
-    labels = [-100] * len(input_ids)
+    labels = [-100] * len(input_ids)  # Default label is -100 (ignore token)
 
-    # Extract the assistant's response
     assistant_text = extract_assistant_content(messages)
     if assistant_text == "":
         tokenized["labels"] = labels
         return tokenized
 
+    # Find where the assistant's response starts
     start_idx = chat_text.find(assistant_text)
     if start_idx == -1:
         tokenized["labels"] = labels
         return tokenized
 
-    # Create the labels by aligning assistant response with the input
     prefix = chat_text[:start_idx]
     prefix_ids = tokenizer(prefix, truncation=True, max_length=MAX_LENGTH)["input_ids"]
-    
+
     assistant_ids = tokenizer(
         assistant_text,
         add_special_tokens=False,
         truncation=True,
         max_length=MAX_LENGTH,
     )["input_ids"]
-    
+
+    # Label the assistant's response correctly
     start = len(prefix_ids)
     end = min(start + len(assistant_ids), len(input_ids))
 
@@ -120,7 +110,7 @@ eval_dataset = eval_dataset.map(
     remove_columns=eval_dataset.column_names,
 )
 
-# Data Collator for Language Modeling
+# Data Collator for Language Modeling (no masking, as it's a causal LM)
 data_collator = DataCollatorForLanguageModeling(
     tokenizer=tokenizer,
     mlm=False,
@@ -135,7 +125,7 @@ training_args = TrainingArguments(
     logging_steps=100,
     per_device_train_batch_size=2,
     per_device_eval_batch_size=2,
-    gradient_accumulation_steps=8,  # effective batch = 16
+    gradient_accumulation_steps=8,
     num_train_epochs=2,
     learning_rate=5e-5,  # QLoRA LR
     warmup_ratio=0.03,
@@ -148,7 +138,32 @@ training_args = TrainingArguments(
     report_to="none",
 )
 
-# Initialize Trainer
+# Track training and evaluation loss for plotting
+class LossPlottingCallback(TrainerCallback):
+    def __init__(self):
+        self.train_losses = []
+        self.eval_losses = []
+
+    def on_log(self, args, state: TrainerState, control, logs=None, **kwargs):
+        if 'loss' in logs:
+            self.train_losses.append(logs['loss'])
+        if 'eval_loss' in logs:
+            self.eval_losses.append(logs['eval_loss'])
+
+    def plot_losses(self):
+        # Plot the training and evaluation losses
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.train_losses, label="Training Loss")
+        plt.plot(self.eval_losses, label="Evaluation Loss", linestyle="--")
+        plt.xlabel("Steps")
+        plt.ylabel("Loss")
+        plt.legend()
+        plt.title("Training and Evaluation Losses")
+        plt.show()
+
+# Initialize Trainer with the callback for loss plotting
+loss_plotter = LossPlottingCallback()
+
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -156,15 +171,19 @@ trainer = Trainer(
     eval_dataset=eval_dataset,
     tokenizer=tokenizer,
     data_collator=data_collator,
+    callbacks=[loss_plotter]
 )
 
 # Start training
 trainer.train()
 
+# Plot losses after training
+loss_plotter.plot_losses()
+
 # Save final model and tokenizer
 model.save_pretrained("/content/final_lora")
 tokenizer.save_pretrained("/content/final_lora")
 
-# Evaluate the model
+# Evaluate the model after training
 eval_results = trainer.evaluate()
-print(eval_results)
+print(f"Final evaluation results: {eval_results}")
