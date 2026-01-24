@@ -15,25 +15,16 @@ def generate_sample() -> dict:
     return {
         "messages": [
             {
-                "role": "system",
-                "content": (
-                    "You are a highly capable assistant that completes partial Dyck sequences. "
-                    "Use stack-based reasoning. Explain your reasoning step by step using the <think> tag. "
-                    "After reasoning, output the completed Dyck sequence."
-                )
-            },
-            {
                 "role": "user",
                 "content": f"Complete this Dyck sequence: {partial_sequence}"
             },
             {
                 "role": "assistant",
                 "content": (
-                    "<｜Assistant｜><think>\n"
+                    "<think>\n"
                     + "\n".join(reasoning)
                     + "\n</think>"
                     f"Here is the completed Dyck sequence: {completed_sequence}"
-                    "<｜end▁of▁sentence｜>"
                 )
             }
         ]
