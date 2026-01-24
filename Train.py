@@ -3,7 +3,6 @@
 
 import torch
 from datasets import load_dataset
-from Train.preprocess import preprocess
 from unsloth import FastLanguageModel
 from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
 
@@ -51,6 +50,64 @@ eval_dataset = dataset["test"]
 # Print a sample from the dataset to check
 print(train_dataset[0])
 
+# Function to extract assistant content from messages
+def extract_assistant_content(messages):
+    for msg in messages:
+        if msg["role"] == "assistant":
+            return msg["content"]
+    return ""
+
+# Preprocess function to tokenize the dataset
+def preprocess(example):
+    messages = example["messages"]
+    
+    # Apply chat template for tokenization
+    chat_text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    
+    tokenized = tokenizer(
+        chat_text,
+        truncation=True,
+        max_length=MAX_LENGTH,
+        padding=False,
+    )
+    
+    input_ids = tokenized["input_ids"]
+    labels = [-100] * len(input_ids)
+
+    # Extract the assistant's response
+    assistant_text = extract_assistant_content(messages)
+    if assistant_text == "":
+        tokenized["labels"] = labels
+        return tokenized
+
+    start_idx = chat_text.find(assistant_text)
+    if start_idx == -1:
+        tokenized["labels"] = labels
+        return tokenized
+
+    # Create the labels by aligning assistant response with the input
+    prefix = chat_text[:start_idx]
+    prefix_ids = tokenizer(prefix, truncation=True, max_length=MAX_LENGTH)["input_ids"]
+    
+    assistant_ids = tokenizer(
+        assistant_text,
+        add_special_tokens=False,
+        truncation=True,
+        max_length=MAX_LENGTH,
+    )["input_ids"]
+    
+    start = len(prefix_ids)
+    end = min(start + len(assistant_ids), len(input_ids))
+
+    for i in range(start, end):
+        labels[i] = input_ids[i]
+
+    tokenized["labels"] = labels
+    return tokenized
 
 # Apply preprocessing to train and eval datasets
 train_dataset = train_dataset.map(
