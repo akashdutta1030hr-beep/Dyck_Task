@@ -224,26 +224,68 @@ Provide only the complete valid sequence."""
 
 
 if __name__ == "__main__":
-    # Check command-line argument for seed
-    if len(sys.argv) < 2:
-        print("Usage: python generator.py <seed>")
-        sys.exit(1)
+    with open(f"data/conversation.jsonl", "w", encoding="utf-8") as f:
+        f.write(json.dumps("", ensure_ascii=False))
 
-    seed = int(sys.argv[1])
+    for i in range(10000):
+        task_id = random.randint(0, 100000000)
+        print(f"Generated task_id: {task_id}")
 
-    # Create Dyck Language Generator instance
-    generator = DyckLanguageGenerator()
+        # Create Dyck Language Generator instance
+        generator = DyckLanguageGenerator()
 
-    # Generate the task
-    task = generator.generate(
-        seed=seed,
-        n_types=6,  # Number of bracket types
-        total_length=40,  # Total sequence length
-        to_fill_length=20,  # Length to fill
-        nesting_depth=3,  # Minimum nesting depth
-        max_attempts=1000  # Max attempts to generate a valid sequence
-    )
+        # Generate the task
+        task = generator.generate(
+            seed=task_id,
+            n_types=6,  # Number of bracket types
+            total_length=40,  # Total sequence length
+            to_fill_length=20,  # Length to fill
+            nesting_depth=3,  # Minimum nesting depth
+            max_attempts=1000  # Max attempts to generate a valid sequence
+        )
 
-    # Print the task as JSON
-    print("Generated Dyck Language Task (in JSON format):")
-    print(task.to_json_str())
+        # Print the task as JSON
+        print("Generated Dyck Language Task (in JSON format):")
+        # print(json.dumps(task.to_json(), ensure_ascii=False, indent=4))
+        stack = []
+        reasoning = ""
+        sequence = task.metadata['question_sequence']
+        brackets = [
+            ("(", ")"),
+            ("[", "]"),
+            ("{", "}"),
+            ("<", ">"),
+            ("⟨", "⟩"),
+            ("⟦", "⟧"),
+            ("⦃", "⦄"),
+            ("⦅", "⦆")
+        ]
+        open_brackets = [bracket[0] for bracket in brackets]
+        clos_brackets = [bracket[1] for bracket in brackets]
+        brackets_dict = {bracket[0]: bracket[1] for bracket in brackets}
+        for i, char in enumerate(sequence):
+            if char in open_brackets:
+                stack.append(brackets_dict[char])
+                reasoning += f"# Thought {i + 1}: {i + 1}th character is an opening bracket '{char}', pushing it onto the stack. Stack: {stack}\n"
+            elif char in clos_brackets:
+                if stack:
+                    open_bracket = stack[-1]
+                    stack.pop()
+                    reasoning += f"# Thought {i + 1}: {i + 1}th character is a closing bracket '{char}', matching it with '{open_bracket}' and popping from the stack. Stack: {stack}\n"
+        reasoning += f"# Thought {i + 1}: All brackets are matched. The Dyck sequence is now complete. Stack: {stack}\n"
+        reasoning += f"Here is the completed Dyck sequence: {task.metadata['full_sequence']}\n"
+        # print(reasoning)
+        conversation = [
+            {
+                "role": "user",
+                "content": f"{task.question}",
+                "reasoning_content": ""
+            },
+            {
+                "role": "assistant",
+                "content": f"{task.metadata['full_sequence']}",
+                "reasoning_content": f"{reasoning}"
+            }
+        ]
+        with open(f"data/conversation.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(conversation, ensure_ascii=False) + "\n")

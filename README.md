@@ -1,6 +1,6 @@
 # Reasoning Model for Dyck Sequence Completion
 
-This project trains a language model to complete partial Dyck sequences (properly matched bracket sequences) with step-by-step reasoning. The model learns to explain its reasoning process using `<think>` tags before providing the final answer.
+This project trains a language model to complete partial Dyck sequences (properly matched bracket sequences) with step-by-step reasoning. The model learns to explain its reasoning process using step-by-step thoughts before providing the final answer.
 
 ## Overview
 
@@ -11,17 +11,9 @@ The project consists of two main components:
 ## Project Structure
 
 ```
-Reasoning-Model/
-├── data/                          # Data generation module
-│   ├── __init__.py
-│   ├── config.py                  # Bracket pair configurations
-│   ├── chat_template.py           # Jinja template for chat format
-│   ├── generate_dataset.py        # Main dataset generation function
-│   ├── generate_sample.py        # Single sample generation
-│   ├── generate_dyck_sequence.py  # Valid Dyck sequence generator
-│   ├── generate_partial_dyck_sequence.py  # Partial sequence creator
-│   └── generate_reasoning.py      # Reasoning step generator
-├── data_generator.py              # Script to generate dataset JSON file
+Dyck_Task/
+├── generator.py                   # Data generation script
+├── conversation.jsonl             # Generated dataset (JSONL format)
 ├── Train.py                       # Training script (Python)
 ├── Train.ipynb                    # Training script (Jupyter Notebook)
 └── README.md                      # This file
@@ -29,18 +21,18 @@ Reasoning-Model/
 
 ## Features
 
-- **Dyck Sequence Generation**: Generates valid bracket sequences with 1-4 types of brackets: `()`, `[]`, `{}`, `<>`
-- **Partial Sequence Creation**: Creates incomplete sequences by randomly removing closing brackets
-- **Reasoning Generation**: Automatically generates step-by-step reasoning using stack-based logic
+- **Dyck Sequence Generation**: Generates valid bracket sequences with up to 8 types of brackets: `()`, `[]`, `{}`, `<>`, `⟨⟩`, `⟦⟧`, `⦃⦄`, `⦅⦆`
+- **Partial Sequence Creation**: Creates incomplete sequences by cutting at a specific point, leaving unmatched opening brackets
+- **Reasoning Generation**: Automatically generates step-by-step reasoning using stack-based logic with "# Thought" format
 - **Efficient Training**: Uses Unsloth with LoRA/QLoRA for memory-efficient fine-tuning
-- **Loss Visualization**: Includes callback to plot training and evaluation losses
+- **Reasoning Model Training**: Trains the model to predict both reasoning and completion given user input
 
 ## Requirements
 
 Install the required dependencies:
 
 ```bash
-pip install transformers datasets unsloth matplotlib torch
+pip install transformers datasets unsloth torch
 ```
 
 ## Usage
@@ -50,27 +42,24 @@ pip install transformers datasets unsloth matplotlib torch
 First, generate the training dataset:
 
 ```bash
-python data_generator.py
+python generator.py
 ```
 
-This will create `dyck_language_with_reasoning_dataset.json` with 100,000 samples by default. You can modify the number of samples in `data_generator.py`.
+This will create `conversation.jsonl` with 10,000 samples by default. The generator creates a JSONL file where each line contains a JSON array with user and assistant messages.
 
-**Configuration in `data_generator.py`:**
-- `NUM_SAMPLES`: Number of samples to generate (default: 100,000)
-- `OUTPUT_FILE`: Output filename (default: "dyck_language_with_reasoning_dataset.json")
+**Configuration in `generator.py`:**
+- Number of samples: Modify the `range(10000)` in the `__main__` block (default: 10,000)
+- `n_types`: Number of bracket types to use (default: 6, range: 1-8)
+- `total_length`: Total sequence length (default: 40)
+- `to_fill_length`: Length of closing brackets to generate (default: 20)
+- `nesting_depth`: Minimum nesting depth (default: 3)
 
 ### 2. Train the Model
 
-You can train using either the Python script or Jupyter notebook:
+Train using the Python script:
 
-**Option A: Python Script**
 ```bash
 python Train.py
-```
-
-**Option B: Jupyter Notebook**
-```bash
-jupyter notebook Train.ipynb
 ```
 
 **Training Configuration:**
@@ -83,113 +72,377 @@ jupyter notebook Train.ipynb
 - **Training Parameters**:
   - Batch size: 2 per device
   - Gradient accumulation: 8 steps
-  - Learning rate: 5e-5
-  - Epochs: 2
+  - Learning rate: 4e-5
+  - Epochs: 3
   - Evaluation: Every 500 steps
+  - Warmup ratio: 0.1
 
-**Important**: Update the `DATA_PATH` in `Train.py` or `Train.ipynb` to point to your generated dataset file.
+**Important**: 
+- Update the `DATA_PATH` in `Train.py` to point to your generated dataset file (default: `conversation.jsonl`)
+- The training script automatically handles the JSONL format
 
 ## Data Format
 
-Each sample in the dataset follows this structure:
+The generator creates a JSONL file (`conversation.jsonl`) where each line is a JSON array containing a conversation:
 
 ```json
-{
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a highly capable assistant that completes partial Dyck sequences..."
-    },
-    {
-      "role": "user",
-      "content": "Complete this Dyck sequence: (([{"
-    },
-    {
-      "role": "assistant",
-      "content": "<think>\nEncountered opening bracket '(', pushing it onto the stack.\nEncountered opening bracket '(', pushing it onto the stack.\nEncountered opening bracket '[', pushing it onto the stack.\nEncountered opening bracket '{', pushing it onto the stack.\nStack still contains '{', so append its matching closing bracket '}'.\nStack still contains '[', so append its matching closing bracket ']'.\nStack still contains '(', so append its matching closing bracket ')'.\nStack still contains '(', so append its matching closing bracket ')'.\nAll brackets are matched. The Dyck sequence is now complete.\n</think>Here is the completed Dyck sequence: (([{}]))"
-    }
-  ]
-}
+[
+  {
+    "role": "user",
+    "content": "Complete the following Dyck language sequence by adding the minimal necessary closing brackets.\n\nSequence: {{[{⟨⟦({[{(⟨{[(⟨(<<{\n\nRules:\n- Add only the closing brackets needed to match all unmatched opening brackets\n- Do not add any extra bracket pairs beyond what is required\n\nProvide only the complete valid sequence.",
+    "reasoning_content": ""
+  },
+  {
+    "role": "assistant",
+    "content": "{{[{⟨⟦({[{(⟨{[(⟨(<<{}>>)⟩)]}⟩)}]})⟧⟩}]}}",
+    "reasoning_content": "# Thought 1: 1th character is an opening bracket '{', pushing it onto the stack. Stack: ['}']\n# Thought 2: 2th character is an opening bracket '{', pushing it onto the stack. Stack: ['}', '}']\n...\n# Thought 20: All brackets are matched. The Dyck sequence is now complete. Stack: [...]\nHere is the completed Dyck sequence: {{[{⟨⟦({[{(⟨{[(⟨(<<{}>>)⟩)]}⟩)}]})⟧⟩}]}}"
+  }
+]
 ```
+
+**Fields:**
+- `role`: Either "user" or "assistant"
+- `content`: The message content (user's question or assistant's completion)
+- `reasoning_content`: Step-by-step reasoning (only present for assistant messages)
+
+## Training Method
+
+The training follows a **reasoning model** approach:
+
+### Input-Output Structure
+- **Input**: User's `content` (the question/task about completing the Dyck sequence)
+- **Output**: Assistant's response combining:
+  - `reasoning_content`: Step-by-step reasoning (e.g., "# Thought 1: ...")
+  - `content`: The final completion/answer
+
+### Loss Computation
+- **User tokens**: Label = `-100` (ignored in loss calculation)
+- **Assistant tokens**: Label = actual token ID (loss computed here)
+- The model receives the full conversation (user + assistant) but learns to predict only the assistant's response
+
+### Training Objective
+The model learns: **P(assistant_output | user_input)**
+
+This means:
+- Given the user's question, predict the assistant's reasoning and completion
+- Loss is computed only on the assistant's tokens (both reasoning and completion)
+- User tokens provide context but don't contribute to the loss
 
 ## How It Works
 
 ### 1. Dyck Sequence Generation
-- Generates valid bracket sequences of even length (8-24 characters)
-- Supports 1-4 types of brackets: `()`, `[]`, `{}`, `<>`
+- Generates valid bracket sequences with configurable length (default: 40 characters)
+- Supports up to 8 types of brackets: `()`, `[]`, `{}`, `<>`, `⟨⟩`, `⟦⟧`, `⦃⦄`, `⦅⦆`
 - Uses a stack-based algorithm to ensure proper matching
+- Ensures minimum nesting depth is met
 
 ### 2. Partial Sequence Creation
-- Takes a complete Dyck sequence
-- Randomly removes ~40% of closing brackets (60% keep rate)
-- Results in an incomplete sequence that needs completion
+- Generates a complete valid Dyck sequence
+- Cuts the sequence at a specific point (`cut_point = total_length - fill_length`)
+- The prefix (up to cut point) contains the partial sequence with unmatched opening brackets
+- The suffix (after cut point) contains the closing brackets needed to complete the sequence
 
 ### 3. Reasoning Generation
 - Processes the partial sequence character by character
 - Tracks opening brackets on a stack
-- Generates step-by-step reasoning for each bracket operation
+- Generates step-by-step reasoning using "# Thought N:" format for each bracket operation
+- Shows the stack state after each operation
 - Completes the sequence by closing remaining open brackets
 
 ### 4. Model Training
-- Uses chat template formatting for the conversation
-- Labels only the assistant's response (reasoning + completion) for training
-- Uses causal language modeling with proper label masking
-- Fine-tunes with LoRA for efficient parameter updates
+- **Preprocessing**:
+  1. Parses JSONL format (each line is a JSON array)
+  2. Extracts user and assistant messages
+  3. Combines assistant's `reasoning_content` and `content` into a single response
+  4. Formats as messages for chat template
+  5. Tokenizes full conversation (user + assistant)
+  6. Creates labels: `-100` for user tokens, actual token IDs for assistant tokens
+  
+- **Training**:
+  - Uses causal language modeling
+  - Loss computed only on assistant tokens
+  - Fine-tunes with LoRA for efficient parameter updates
+  - Model learns to predict assistant's reasoning + completion given user input
 
 ## Model Output
 
 The trained model will:
-1. Receive a partial Dyck sequence as input
-2. Generate reasoning steps inside `<think>` tags
+1. Receive a partial Dyck sequence as input (user's question)
+2. Generate step-by-step reasoning (in "# Thought" format)
 3. Output the completed Dyck sequence
+
+Example:
+```
+Input: "Complete the following Dyck sequence: [⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨"
+
+Output:
+# Thought 1: 1th character is an opening bracket '[', pushing it onto the stack...
+# Thought 2: 2th character is an opening bracket '⟨', pushing it onto the stack...
+...
+[⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨⟩}⟩⟧⟩>⟩>]}]⟧>}⟩>])⟩]
+```
 
 ## Training Output
 
 After training, the model will be saved to:
-- `/content/final_lora/` (default path - update as needed)
+- `results/` (default path - update `OUTPUT_DIR` in `Train.py` as needed)
 
-The training script also:
-- Plots training and evaluation losses
+The training script:
 - Saves checkpoints every 500 steps
 - Evaluates on a held-out test set (5% of data)
+- Keeps the best 3 checkpoints based on evaluation loss
+- Prints training progress and final evaluation results
 
 ## Customization
 
 ### Modify Dataset Size
-Edit `NUM_SAMPLES` in `data_generator.py`:
+Edit the range in `generator.py`:
 ```python
-NUM_SAMPLES = 50000  # Change to desired number
+for i in range(10000):  # Change to desired number
 ```
 
-### Adjust Sequence Lengths
-Edit `generate_sample.py`:
+### Adjust Sequence Parameters
+Edit the `generate()` call in `generator.py`:
 ```python
-total_length = random.choice([8, 10, 12, 14, 16, 18, 20, 24])  # Modify as needed
+task = generator.generate(
+    seed=task_id,
+    n_types=6,          # Number of bracket types (1-8)
+    total_length=40,     # Total sequence length
+    to_fill_length=20,   # Length of closing brackets to generate
+    nesting_depth=3,     # Minimum nesting depth
+    max_attempts=1000    # Max attempts to generate valid sequence
+)
 ```
 
 ### Change Bracket Types
-Edit `data/config.py` to add or modify bracket pairs:
-```python
-BRACKET_PAIRS: Dict[int, List[str]] = {
-    1: ['(', ')'],
-    2: ['(', ')', '[', ']'],
-    # Add more types...
-}
-```
+The generator supports 8 bracket types by default. To use fewer types, modify `n_types` in the `generate()` call. The available brackets are:
+- `()`, `[]`, `{}`, `<>`, `⟨⟩`, `⟦⟧`, `⦃⦄`, `⦅⦆`
 
 ### Adjust Training Parameters
-Modify `TrainingArguments` in `Train.py` or `Train.ipynb`:
+Modify `TrainingArguments` in `Train.py`:
 - `num_train_epochs`: Number of training epochs
 - `learning_rate`: Learning rate
 - `per_device_train_batch_size`: Batch size
 - `gradient_accumulation_steps`: Gradient accumulation
+- `MAX_LENGTH`: Maximum sequence length
+
+## Key Points
+
+- **Reasoning Model Training**: The model learns to generate both reasoning and completion
+- **Loss Computation**: Loss is computed only on assistant tokens (both reasoning and completion)
+- **Efficient Training**: Uses Unsloth with 4-bit quantization and LoRA for memory efficiency
+- **JSONL Format**: The dataset uses JSONL format where each line is a JSON array
+- **Chat Template**: Uses the model's chat template for proper formatting
+
+## Training Configuration Guidelines
+
+### Well-Performing Model and Dataset Sizes
+
+Based on empirical results and best practices:
+
+**Model Sizes:**
+- **Small models (100M - 1.5B)**: Excellent for domain-specific tasks, fast training, low memory
+  - Examples: 350M, 1B, 1.5B
+  - Best for: Small to medium datasets (1K - 50K samples)
+  - Training time: Hours to 1-2 days on consumer GPUs
+  
+- **Medium models (3B - 7B)**: Good balance of capability and efficiency
+  - Examples: 3B, 7B
+  - Best for: Medium to large datasets (10K - 500K samples)
+  - Training time: 1-3 days on consumer GPUs, hours on enterprise GPUs
+  
+- **Large models (13B+)**: High capability, requires significant resources
+  - Examples: 13B, 30B, 70B
+  - Best for: Large datasets (100K+ samples)
+  - Training time: Days to weeks, typically requires multiple GPUs
+
+**Dataset Sizes:**
+- **Small (<10K samples)**: 
+  - Use 5-10 epochs to fully utilize data
+  - Higher learning rate can help (especially with LoRA)
+  - Watch for overfitting - use early stopping
+  - Examples: Domain-specific tasks, few-shot learning scenarios
+  
+- **Medium (10K - 100K samples)**:
+  - Use 3-5 epochs typically sufficient
+  - Standard learning rates work well
+  - Good balance between training time and performance
+  - Examples: Most fine-tuning tasks
+  
+- **Large (100K+ samples)**:
+  - Use 1-3 epochs often sufficient
+  - Lower learning rates recommended
+  - Requires more computational resources
+  - Examples: Large-scale instruction tuning, general-purpose fine-tuning
+
+### Thumb Rules for Training Configuration
+
+#### 1. Learning Rate Selection
+
+**By Fine-tuning Method:**
+- **Full fine-tuning**: `1e-5` to `5e-5` (conservative)
+- **LoRA/QLoRA**: `1e-4` to `5e-4` (can be 10x higher than full fine-tuning)
+- **Adapter methods**: Similar to LoRA, `1e-4` to `3e-4`
+
+**By Model Size:**
+- **Small models (<3B)**: `2e-4` to `5e-4` (LoRA) or `2e-5` to `5e-5` (full)
+- **Medium models (3-7B)**: `1e-4` to `3e-4` (LoRA) or `1e-5` to `3e-5` (full)
+- **Large models (7B+)**: `5e-5` to `2e-4` (LoRA) or `5e-6` to `2e-5` (full)
+
+**By Dataset Size:**
+- **Small datasets**: Slightly higher LR (more aggressive learning)
+- **Large datasets**: Slightly lower LR (more stable training)
+
+#### 2. Batch Size Configuration
+
+**Effective Batch Size Formula:**
+```
+Effective batch size = per_device_batch_size × gradient_accumulation_steps × num_gpus
+```
+
+**Recommended Effective Batch Sizes:**
+- **Small models (<3B)**: 16-32 effective batch size
+- **Medium models (3-7B)**: 8-16 effective batch size
+- **Large models (7B+)**: 4-8 effective batch size
+
+**Memory Management:**
+- If GPU memory is limited, use gradient accumulation to increase effective batch size
+- Common gradient accumulation: 4-8 steps for small GPUs, 1-2 for large GPUs
+- Per-device batch size: Start with 2-4, increase if memory allows
+
+#### 3. Number of Epochs
+
+**By Dataset Size:**
+- **Small dataset (<10K)**: 5-10 epochs (watch for overfitting)
+- **Medium dataset (10K-100K)**: 3-5 epochs
+- **Large dataset (100K+)**: 1-3 epochs
+
+**Best Practices:**
+- Use early stopping to prevent overfitting
+- Monitor validation loss - stop when it starts increasing
+- Small datasets may need more epochs to fully learn patterns
+
+#### 4. Evaluation and Checkpointing
+
+**Evaluation Frequency:**
+- **Small dataset**: Every 100-500 steps (more frequent)
+- **Medium dataset**: Every 500-1000 steps
+- **Large dataset**: Every 1000-5000 steps
+
+**Checkpoint Saving:**
+- Save checkpoints more frequently for small datasets (don't want to lose progress)
+- Keep 3-5 best checkpoints based on validation loss
+- Save final model after training completes
+
+#### 5. Warmup Strategy
+
+**Warmup Ratio:**
+- **Small dataset**: 5-10% of total training steps
+- **Medium dataset**: 3-5% of total training steps
+- **Large dataset**: 1-3% of total training steps
+- **Default**: 0.1 (10%) works well for most cases
+
+**Purpose**: Gradually increase learning rate at the start to stabilize training
+
+#### 6. Optimizer Selection
+
+**AdamW** (Recommended):
+- Default choice, works well for most cases
+- Good convergence properties
+- Works with both full fine-tuning and LoRA
+
+**8-bit AdamW**:
+- For memory-constrained setups
+- Reduces memory usage by ~50%
+- Slightly slower but enables larger batch sizes
+
+**SGD**:
+- Rarely used for language models
+- Only consider for very large batch sizes (>128)
+
+#### 7. Learning Rate Scheduler
+
+**Cosine Scheduler** (Recommended):
+- Smooth decay from max LR to 0
+- Best for most cases
+- Provides good convergence
+
+**Linear Scheduler**:
+- Simple linear decay
+- Good default alternative
+- More predictable than cosine
+
+**Constant Scheduler**:
+- Rarely used
+- Only for very specific scenarios
+
+#### 8. Gradient Accumulation
+
+**When to Use:**
+- GPU memory is limited
+- Want larger effective batch size
+- Training on single GPU with limited VRAM
+
+**Common Settings:**
+- **Small GPUs (8-16GB)**: 4-8 accumulation steps
+- **Medium GPUs (24-32GB)**: 2-4 accumulation steps
+- **Large GPUs (40GB+)**: 1-2 accumulation steps
+
+**Formula**: Effective batch = batch_size × gradient_accumulation
+
+#### 9. Mixed Precision Training
+
+**FP16** (Half Precision):
+- For older GPUs (V100, RTX 20xx series)
+- Reduces memory usage by ~50%
+- May have numerical instability issues
+
+**BF16** (Brain Float 16):
+- For newer GPUs (A100, RTX 30xx+, H100)
+- More stable than FP16
+- Better numerical properties
+- **Recommended if available**
+
+**FP32** (Full Precision):
+- Only if numerical stability is critical
+- Uses 2x memory of FP16/BF16
+- Rarely needed for fine-tuning
+
+#### 10. Sequence Length
+
+**Common Choices:**
+- **512**: Good for most tasks, fast training, low memory
+- **1024**: Better context, moderate memory
+- **2048**: Long context, higher memory
+- **4096**: Very long context, high memory requirements
+
+**Selection Guidelines:**
+- Match your task's context requirements
+- Longer sequences = more memory and slower training
+- Start with 512, increase if needed
+- Consider your GPU memory constraints
+
+### Current Project Configuration
+
+**Model**: 1.5B parameters (DeepSeek-R1-Distill-Qwen-1.5B) - Small model
+**Dataset**: ~10,000 samples - Small dataset
+**Method**: LoRA fine-tuning
+
+**Optimized Settings:**
+- **Learning rate**: `2e-4` (higher for LoRA, safe range: 1e-4 to 5e-4)
+- **Batch size**: `4 × 4 = 16` effective (good for 1.5B model, target: 16-32)
+- **Epochs**: `5` (more epochs for small dataset to fully utilize data)
+- **Evaluation**: Every `250` steps (frequent evaluation for small dataset)
+- **Scheduler**: `cosine` (smooth learning rate decay)
+- **Mixed precision**: `fp16` (works on most GPUs)
 
 ## Notes
 
 - The project uses **Unsloth** for efficient training with 4-bit quantization and LoRA
 - Training is optimized for GPUs with limited memory
-- The model learns to generate both reasoning and the final answer
-- All reasoning is contained within `<think>` tags, following DeepSeek-R1 format
+- The model learns to generate both reasoning (in "# Thought" format) and the final answer
+- The training script automatically handles the JSONL format and combines reasoning with completion
+- User tokens provide context but don't contribute to loss calculation
 
 ## License
 
