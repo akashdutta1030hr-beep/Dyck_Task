@@ -70,12 +70,19 @@ python Train.py
   - `lora_alpha=32`: LoRA alpha
   - `lora_dropout=0.05`: Dropout rate
 - **Training Parameters**:
-  - Batch size: 2 per device
-  - Gradient accumulation: 8 steps
-  - Learning rate: 4e-5
-  - Epochs: 3
-  - Evaluation: Every 500 steps
+  - Batch size: 4 per device
+  - Gradient accumulation: 4 steps (effective batch size: 16)
+  - Learning rate: 2e-4
+  - Epochs: 5
+  - Learning rate scheduler: cosine
   - Warmup ratio: 0.1
+  - Weight decay: 0.01
+  - Gradient clipping: 1.0
+  - Mixed precision: fp16
+  - Evaluation: Every 250 steps
+  - Checkpoint saving: Every 250 steps
+  - Logging: Every 50 steps
+  - Best model selection: Based on eval_loss (keeps top 3 checkpoints)
 
 **Important**: 
 - Update the `DATA_PATH` in `Train.py` to point to your generated dataset file (default: `conversation.jsonl`)
@@ -103,7 +110,11 @@ The generator creates a JSONL file (`conversation.jsonl`) where each line is a J
 **Fields:**
 - `role`: Either "user" or "assistant"
 - `content`: The message content (user's question or assistant's completion)
+<<<<<<< HEAD
 - `reasoning_content`: Step-by-step reasoning (only present for assistant messages)
+=======
+- `reasoning_content`: Step-by-step reasoning (only present for assistant messages, in "# Thought N:" format)
+>>>>>>> c9f3018 (Update config and ReadMe)
 
 ## Training Method
 
@@ -176,9 +187,16 @@ Example:
 Input: "Complete the following Dyck sequence: [⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨"
 
 Output:
+<<<<<<< HEAD
 # Thought 1: 1th character is an opening bracket '[', pushing it onto the stack...
 # Thought 2: 2th character is an opening bracket '⟨', pushing it onto the stack...
 ...
+=======
+# Thought 1: 1th character is an opening bracket '[', pushing it onto the stack. Stack: [']']
+# Thought 2: 2th character is an opening bracket '⟨', pushing it onto the stack. Stack: [']', '⟩']
+...
+# Thought 20: All brackets are matched. The Dyck sequence is now complete.
+>>>>>>> c9f3018 (Update config and ReadMe)
 [⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨⟩}⟩⟧⟩>⟩>]}]⟧>}⟩>])⟩]
 ```
 
@@ -188,7 +206,11 @@ After training, the model will be saved to:
 - `results/` (default path - update `OUTPUT_DIR` in `Train.py` as needed)
 
 The training script:
+<<<<<<< HEAD
 - Saves checkpoints every 500 steps
+=======
+- Saves checkpoints every 250 steps
+>>>>>>> c9f3018 (Update config and ReadMe)
 - Evaluates on a held-out test set (5% of data)
 - Keeps the best 3 checkpoints based on evaluation loss
 - Prints training progress and final evaluation results
@@ -220,11 +242,25 @@ The generator supports 8 bracket types by default. To use fewer types, modify `n
 
 ### Adjust Training Parameters
 Modify `TrainingArguments` in `Train.py`:
+<<<<<<< HEAD
 - `num_train_epochs`: Number of training epochs
 - `learning_rate`: Learning rate
 - `per_device_train_batch_size`: Batch size
 - `gradient_accumulation_steps`: Gradient accumulation
 - `MAX_LENGTH`: Maximum sequence length
+=======
+- `num_train_epochs`: Number of training epochs (default: 5)
+- `learning_rate`: Learning rate (default: 2e-4)
+- `per_device_train_batch_size`: Batch size per device (default: 4)
+- `gradient_accumulation_steps`: Gradient accumulation (default: 4)
+- `lr_scheduler_type`: Learning rate scheduler (default: "cosine")
+- `warmup_ratio`: Warmup ratio (default: 0.1)
+- `weight_decay`: Weight decay for regularization (default: 0.01)
+- `max_grad_norm`: Gradient clipping (default: 1.0)
+- `eval_steps`: Evaluation frequency (default: 250)
+- `save_steps`: Checkpoint saving frequency (default: 250)
+- `MAX_LENGTH`: Maximum sequence length (default: 512)
+>>>>>>> c9f3018 (Update config and ReadMe)
 
 ## Key Points
 
@@ -233,6 +269,10 @@ Modify `TrainingArguments` in `Train.py`:
 - **Efficient Training**: Uses Unsloth with 4-bit quantization and LoRA for memory efficiency
 - **JSONL Format**: The dataset uses JSONL format where each line is a JSON array
 - **Chat Template**: Uses the model's chat template for proper formatting
+<<<<<<< HEAD
+=======
+- **Training Method**: User content as input, assistant content (reasoning + completion) as output
+>>>>>>> c9f3018 (Update config and ReadMe)
 
 ## Training Configuration Guidelines
 
@@ -446,8 +486,8 @@ Effective batch size = per_device_batch_size × gradient_accumulation_steps × n
 
 ## License
 
-[Add your license information here]
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Author
 
-[Add author information here]
+**akashdutta**
