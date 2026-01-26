@@ -80,26 +80,26 @@ def preprocess(example):
     #   [{"role": "user", ...}, {"role": "assistant", ...}]
     # The datasets library creates: {"text": "[{\"role\": \"user\", ...}, ...]"}
     # We need to parse this JSON string to get the actual conversation array.
-    messages_content = example.get("messages", "")
-    conversation = json.loads(messages_content) if isinstance(messages_content, str) else messages_content
-    
+    text_content = example.get("text", "")
+    conversation = json.loads(text_content) if isinstance(text_content, str) else text_content
+
     # Extract user and assistant messages from the conversation array
     user_msg = None
     assistant_msg = None
-    
+
     for msg in conversation:
         role = msg.get("role", "")
         if role == "user":
             user_msg = msg
         elif role == "assistant":
             assistant_msg = msg
-    
+
     # ========================================================================
     # Extract Input and Output
     # ========================================================================
     # INPUT: User's content (the question/task)
     user_content = user_msg.get("content", "")
-    
+
     # OUTPUT: Assistant's content (reasoning + completion)
     # - reasoning_content: step-by-step reasoning (e.g., "# Thought 1: ...")
     # - content: the final completion/answer
