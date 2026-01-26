@@ -110,11 +110,7 @@ The generator creates a JSONL file (`conversation.jsonl`) where each line is a J
 **Fields:**
 - `role`: Either "user" or "assistant"
 - `content`: The message content (user's question or assistant's completion)
-<<<<<<< HEAD
-- `reasoning_content`: Step-by-step reasoning (only present for assistant messages)
-=======
 - `reasoning_content`: Step-by-step reasoning (only present for assistant messages, in "# Thought N:" format)
->>>>>>> c9f3018 (Update config and ReadMe)
 
 ## Training Method
 
@@ -187,16 +183,10 @@ Example:
 Input: "Complete the following Dyck sequence: [⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨"
 
 Output:
-<<<<<<< HEAD
-# Thought 1: 1th character is an opening bracket '[', pushing it onto the stack...
-# Thought 2: 2th character is an opening bracket '⟨', pushing it onto the stack...
-...
-=======
 # Thought 1: 1th character is an opening bracket '[', pushing it onto the stack. Stack: [']']
 # Thought 2: 2th character is an opening bracket '⟨', pushing it onto the stack. Stack: [']', '⟩']
 ...
 # Thought 20: All brackets are matched. The Dyck sequence is now complete.
->>>>>>> c9f3018 (Update config and ReadMe)
 [⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨⟩}⟩⟧⟩>⟩>]}]⟧>}⟩>])⟩]
 ```
 
@@ -206,11 +196,7 @@ After training, the model will be saved to:
 - `results/` (default path - update `OUTPUT_DIR` in `Train.py` as needed)
 
 The training script:
-<<<<<<< HEAD
-- Saves checkpoints every 500 steps
-=======
 - Saves checkpoints every 250 steps
->>>>>>> c9f3018 (Update config and ReadMe)
 - Evaluates on a held-out test set (5% of data)
 - Keeps the best 3 checkpoints based on evaluation loss
 - Prints training progress and final evaluation results
@@ -242,13 +228,6 @@ The generator supports 8 bracket types by default. To use fewer types, modify `n
 
 ### Adjust Training Parameters
 Modify `TrainingArguments` in `Train.py`:
-<<<<<<< HEAD
-- `num_train_epochs`: Number of training epochs
-- `learning_rate`: Learning rate
-- `per_device_train_batch_size`: Batch size
-- `gradient_accumulation_steps`: Gradient accumulation
-- `MAX_LENGTH`: Maximum sequence length
-=======
 - `num_train_epochs`: Number of training epochs (default: 5)
 - `learning_rate`: Learning rate (default: 2e-4)
 - `per_device_train_batch_size`: Batch size per device (default: 4)
@@ -260,7 +239,6 @@ Modify `TrainingArguments` in `Train.py`:
 - `eval_steps`: Evaluation frequency (default: 250)
 - `save_steps`: Checkpoint saving frequency (default: 250)
 - `MAX_LENGTH`: Maximum sequence length (default: 512)
->>>>>>> c9f3018 (Update config and ReadMe)
 
 ## Key Points
 
@@ -269,10 +247,7 @@ Modify `TrainingArguments` in `Train.py`:
 - **Efficient Training**: Uses Unsloth with 4-bit quantization and LoRA for memory efficiency
 - **JSONL Format**: The dataset uses JSONL format where each line is a JSON array
 - **Chat Template**: Uses the model's chat template for proper formatting
-<<<<<<< HEAD
-=======
 - **Training Method**: User content as input, assistant content (reasoning + completion) as output
->>>>>>> c9f3018 (Update config and ReadMe)
 
 ## Training Configuration Guidelines
 

@@ -229,30 +229,23 @@ data_collator = DataCollatorForLanguageModeling(
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     evaluation_strategy="steps",
-    eval_steps=250,  # More frequent evaluation for small dataset
-    save_steps=250,  # More frequent checkpoints
-    logging_steps=50,  # More frequent logging
-    per_device_train_batch_size=4,  # Increased from 2 (better GPU utilization)
-    per_device_eval_batch_size=4,  # Increased from 2
-    gradient_accumulation_steps=4,  # Reduced from 8 (effective batch = 16, same as before)
-    num_train_epochs=5,  # Increased from 3 (more epochs for small dataset)
-    learning_rate=2e-4,  # Increased from 4e-5 (LoRA can handle higher LR)
-    lr_scheduler_type="cosine",  # Cosine decay (better than linear)
-    warmup_ratio=0.1,  # 10% warmup
+    eval_steps=250,
+    save_steps=250,
+    logging_steps=50,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    gradient_accumulation_steps=4,
+    num_train_epochs=5,
+    learning_rate=2e-4,
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.1,
     weight_decay=0.01,
-    fp16=True,  # Mixed precision training
-    bf16=False,  # Use fp16 (bf16 if available on newer GPUs)
-    max_grad_norm=1.0,  # Gradient clipping
-    save_total_limit=3,  # Keep best 3 checkpoints
+    fp16=True,
+    max_grad_norm=1.0,
+    save_total_limit=3,
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
-    report_to="none",
-    dataloader_num_workers=2,  # Increased from 0 (faster data loading)
-    remove_unused_columns=False,
-    prediction_loss_only=True,
-    optim="adamw_torch",  # Explicit optimizer
-    group_by_length=False,  # Set True if sequences vary greatly in length
 )
 
 # Initialize Trainer
