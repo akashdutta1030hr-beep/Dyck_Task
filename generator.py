@@ -224,8 +224,6 @@ Provide only the complete valid sequence."""
 
 
 if __name__ == "__main__":
-    with open(f"data/conversation.jsonl", "w", encoding="utf-8") as f:
-        f.write(json.dumps("", ensure_ascii=False))
 
     for i in range(10000):
         task_id = random.randint(0, 100000000)
@@ -287,5 +285,5 @@ if __name__ == "__main__":
                 "reasoning_content": f"{reasoning}"
             }
         ]
-        with open(f"data/conversation.jsonl", "a", encoding="utf-8") as f:
+        with open(f"conversation.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(conversation, ensure_ascii=False) + "\n")

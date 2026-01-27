@@ -1,6 +1,7 @@
 import torch
 import json
-from datasets import load_dataset
+import matplotlib.pyplot as plt
+from datasets import load_dataset, Dataset
 from unsloth import FastLanguageModel
 from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
 
@@ -30,13 +31,13 @@ if tokenizer.pad_token is None:
 # Add LoRA (Low-Rank Adaptation) for efficient fine-tuning
 model = FastLanguageModel.get_peft_model(
     model,
-    r=16,
+    r=32,
     target_modules=[
         "q_proj", "k_proj", "v_proj", "o_proj",
         "gate_proj", "up_proj", "down_proj",
     ],
-    lora_alpha=32,
-    lora_dropout=0.05,
+    lora_alpha=64,
+    lora_dropout=0.1,
     bias="none",
     use_gradient_checkpointing=True,
     random_state=42,
@@ -46,7 +47,15 @@ model = FastLanguageModel.get_peft_model(
 # Dataset Loading
 # ============================================================================
 print(f"Loading dataset from {DATA_PATH}...")
-dataset = load_dataset("jsonl", data_files=DATA_PATH)["train"]
+# Load JSONL file - each line is a JSON array (not a JSON object)
+# We need to read it manually since load_dataset expects JSON objects
+data = []
+with open(DATA_PATH, 'r', encoding='utf-8') as f:
+    for line in f:
+        if line.strip():
+            # Store the raw JSON line as "text" field (preprocessing will parse it)
+            data.append({"text": line.strip()})
+dataset = Dataset.from_list(data)
 print(f"Loaded {len(dataset)} samples")
 
 # Split dataset into train and eval
@@ -68,11 +77,13 @@ def preprocess(example):
     
     Training Method:
     - Input: user's content (the question/task)
-    - Output: assistant's content (reasoning_content + content/completion)
-    - Loss: computed ONLY on assistant tokens (both reasoning and completion)
+    - Output: assistant's reasoning_content (step-by-step thoughts + final answer)
+    - Loss: computed ONLY on assistant tokens
     - User tokens are ignored in loss calculation (label = -100)
     
-    This teaches the model: P(assistant_output | user_input)
+    Note: reasoning_content already includes the complete response with the final answer.
+    
+    This teaches the model: P(reasoning + answer | user_input)
     """
     # Parse conversation from JSONL
     # IMPORTANT: When load_dataset("jsonl", ...) loads a JSONL file, it stores each line
@@ -81,7 +92,30 @@ def preprocess(example):
     # The datasets library creates: {"text": "[{\"role\": \"user\", ...}, ...]"}
     # We need to parse this JSON string to get the actual conversation array.
     text_content = example.get("text", "")
-    conversation = json.loads(text_content) if isinstance(text_content, str) else text_content
+    
+    # Handle potential formatting issues (extra quotes, whitespace)
+    if isinstance(text_content, str):
+        text_content = text_content.strip()
+        # Remove all leading/trailing quotes (handle cases like '""[...]' or '"[...]"')
+        while text_content.startswith('"'):
+            text_content = text_content[1:]
+        while text_content.endswith('"'):
+            text_content = text_content[:-1]
+        text_content = text_content.strip()
+        
+        try:
+            conversation = json.loads(text_content)
+        except json.JSONDecodeError as e:
+            # If parsing fails, try to extract JSON array from the string
+            # Find the first '[' and last ']'
+            start_idx = text_content.find('[')
+            end_idx = text_content.rfind(']')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                conversation = json.loads(text_content[start_idx:end_idx+1])
+            else:
+                raise ValueError(f"Failed to parse JSON from text: {text_content[:100]}... Error: {e}")
+    else:
+        conversation = text_content
 
     # Extract user and assistant messages from the conversation array
     user_msg = None
@@ -102,13 +136,15 @@ def preprocess(example):
 
     # OUTPUT: Assistant's content (reasoning + completion)
     # - reasoning_content: step-by-step reasoning (e.g., "# Thought 1: ...")
-    # - content: the final completion/answer
+    #   NOTE: reasoning_content already includes the final answer at the end
+    # - content: the final completion/answer (standalone)
     assistant_reasoning = assistant_msg.get("reasoning_content", "").strip()
     assistant_completion = assistant_msg.get("content", "").strip()
     
-    # Combine reasoning and completion for assistant's full response
+    # Use reasoning_content if available (it already includes the final answer)
+    # Otherwise, use just the completion
     if assistant_reasoning:
-        assistant_content = f"{assistant_reasoning}\n\n{assistant_completion}"
+        assistant_content = assistant_reasoning
     else:
         assistant_content = assistant_completion
     
@@ -228,19 +264,19 @@ data_collator = DataCollatorForLanguageModeling(
 
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
-    evaluation_strategy="steps",
-    eval_steps=250,
+    eval_strategy="steps",
+    eval_steps=50,
     save_steps=250,
     logging_steps=50,
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
-    gradient_accumulation_steps=4,
-    num_train_epochs=5,
-    learning_rate=2e-4,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    gradient_accumulation_steps=8,
+    num_train_epochs=1,
+    learning_rate=1e-4,
     lr_scheduler_type="cosine",
     warmup_ratio=0.1,
-    weight_decay=0.01,
-    fp16=True,
+    weight_decay=0.05,
+    bf16=True,
     max_grad_norm=1.0,
     save_total_limit=3,
     load_best_model_at_end=True,
@@ -266,8 +302,9 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Training Method:")
     print("  - Input: User's content (question/task)")
-    print("  - Output: Assistant's content (reasoning + completion)")
+    print("  - Output: Assistant's reasoning_content (step-by-step thoughts + answer)")
     print("  - Loss: Computed only on assistant tokens")
+    print("  - Format: # Thought N: ... \\n Here is the completed sequence: ...")
     print("=" * 60)
     
     trainer.train()
@@ -283,3 +320,51 @@ if __name__ == "__main__":
     eval_results = trainer.evaluate()
     print(f"Final evaluation results: {eval_results}")
     print(f"Final eval loss: {eval_results.get('eval_loss', 'N/A'):.4f}")
+
+    # ========================================================================
+    # Plot Training Loss Graph
+    # ========================================================================
+    print("\nGenerating training loss graph...")
+    history = trainer.state.log_history
+    
+    # Extract training loss and evaluation loss
+    train_losses = []
+    eval_losses = []
+    train_steps = []
+    eval_steps = []
+    
+    for log in history:
+        if 'loss' in log and 'step' in log:
+            train_losses.append(log['loss'])
+            train_steps.append(log['step'])
+        if 'eval_loss' in log and 'step' in log:
+            eval_losses.append(log['eval_loss'])
+            eval_steps.append(log['step'])
+    
+    # Create the plot
+    plt.figure(figsize=(12, 6))
+    
+    if train_losses:
+        plt.plot(train_steps, train_losses, label='Training Loss', marker='o', markersize=3, linewidth=1.5)
+    
+    if eval_losses:
+        plt.plot(eval_steps, eval_losses, label='Evaluation Loss', marker='s', markersize=3, linewidth=1.5)
+    
+    plt.xlabel('Training Steps', fontsize=12)
+    plt.ylabel('Loss', fontsize=12)
+    plt.title('Training and Evaluation Loss Over Time', fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Save the plot
+    loss_graph_path = f"{OUTPUT_DIR}/training_loss.png"
+    plt.savefig(loss_graph_path, dpi=300, bbox_inches='tight')
+    print(f"Training loss graph saved to {loss_graph_path}")
+    
+    # Optionally display the plot (comment out if running in headless environment)
+    # plt.show()
+    plt.close()
+
+    print("Training complete! 🎉")
+    

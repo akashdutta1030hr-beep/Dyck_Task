@@ -8,29 +8,62 @@ __pycache__/
 .eggs/
 dist/
 build/
+*.egg
 
 # Virtual Environment
 venv/
 env/
 ENV/
 .venv
+venv*/
 
-# Jupyter
+# Jupyter Notebooks
 .ipynb_checkpoints/
+*.ipynb_checkpoints
 
-# Dataset (too large for GitHub; >100MB limit)
+# Datasets (large files)
+conversation.jsonl
+*.jsonl
+*.json
 dyck_language_with_reasoning_dataset.json
 
-# Optional: legacy JSONL if you generate it
-# dyck_prompt_response_chat_reasoning.jsonl
-
-# IDE / OS
-.idea/
-.vscode/
-.DS_Store
-*.swp
-*~
-
-# Training outputs
+# Model outputs and checkpoints
 results/
 output/
+checkpoints/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Training outputs
+training_loss.png
+logs/
+wandb/
+tensorboard/
+
+# Unsloth cache
+unsloth_compiled_cache/
+*.cache
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.code-workspace
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# Test files (optional - uncomment if you want to ignore)
+# test_*.py
+# *_test.py
