@@ -67,3 +67,4 @@ Thumbs.db
 # Test files (optional - uncomment if you want to ignore)
 # test_*.py
 # *_test.py
+conversation.jsonl

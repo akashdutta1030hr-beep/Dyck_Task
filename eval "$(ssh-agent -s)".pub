@@ -1,0 +1,2 @@
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKAsxfYSkbVN9r9cKB9uV2eRR8YHAs3ec/dBspUpJIVh akashdutta1030hr@gmail.com
+ssh-keygen -t ed25519 -C akashdutta1030hr@gmail.com
