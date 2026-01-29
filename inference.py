@@ -1,12 +1,30 @@
 import torch
+import json
 from unsloth import FastLanguageModel
+from tqdm import tqdm
+import re
 
 # ============================================================================
 # Configuration
 # ============================================================================
 BASE_MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 MODEL_PATH = "results"  # Path to fine-tuned model
-MAX_LENGTH = 512
+# Use same cap as training so model context supports full sequences
+MAX_LENGTH = 2048
+DATASET_PATH = "conversation.jsonl"  # 10k samples (match generator default)
+OUTPUT_PATH = "inference_results.jsonl"
+
+# Bracket pairs (opening, closing) used in Dyck sequences - same as generator
+BRACKET_PAIRS = [
+    ("(", ")"),
+    ("[", "]"),
+    ("{", "}"),
+    ("<", ">"),
+    ("⟨", "⟩"),
+    ("⟦", "⟧"),
+    ("⦃", "⦄"),
+    ("⦅", "⦆"),
+]
 
 # ============================================================================
 # Load Fine-tuned Model
@@ -29,344 +47,61 @@ FastLanguageModel.for_inference(model)
 print("Model loaded successfully! ✓\n")
 
 # ============================================================================
-# Inference Function
-# ============================================================================
-def complete_dyck_sequence(partial_sequence, max_new_tokens=256, temperature=0.8, top_p=0.95):
-    """
-    Complete a partial Dyck sequence using the fine-tuned model.
-    
-    Args:
-        partial_sequence: The partial Dyck sequence to complete
-        max_new_tokens: Maximum number of tokens to generate
-        temperature: Sampling temperature (lower = more deterministic)
-        top_p: Nucleus sampling parameter
-    
-    Returns:
-        The model's generated response (reasoning + completion)
-    """
-    # Format the input as a chat message (matching training format)
-    user_message = (
-        f"Complete the following Dyck language sequence by adding the minimal necessary closing brackets.\n\n"
-        f"Sequence: {partial_sequence}\n\n"
-        f"Rules:\n"
-        f"- Add only the closing brackets needed to match all unmatched opening brackets\n"
-        f"- Do not add any extra bracket pairs beyond what is required\n\n"
-        f"Provide only the complete valid sequence."
-    )
-    
-    # Format as messages for chat template
-    messages = [
-        {"role": "user", "content": user_message}
-    ]
-    
-    # Apply chat template
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-    
-    # Tokenize
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=MAX_LENGTH
-    ).to(model.device)
-    
-    # Generate
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            do_sample=True,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-    
-    # Decode only the generated part (excluding the input prompt)
-    generated_text = tokenizer.decode(
-        outputs[0][inputs["input_ids"].shape[1]:],
-        skip_special_tokens=True
-    )
-    
-    return generated_text.strip()
 
-# ============================================================================
-# Interactive Inference
-# ============================================================================
-def interactive_inference():
-    """Run interactive inference session."""
-    print("=" * 70)
-    print("Dyck Sequence Completion - Interactive Inference")
-    print("=" * 70)
-    print("Enter a partial Dyck sequence to complete.")
-    print("Type 'quit' or 'exit' to stop.\n")
-    
-    while True:
-        try:
-            # Get user input
-            partial_seq = input("Enter partial Dyck sequence: ").strip()
-            
-            if partial_seq.lower() in ['quit', 'exit', 'q']:
-                print("\nGoodbye!")
-                break
-            
-            if not partial_seq:
-                print("Please enter a valid sequence.\n")
-                continue
-            
-            print("\nGenerating completion...")
-            print("-" * 70)
-            
-            # Generate response
-            response = complete_dyck_sequence(partial_seq)
-            
-            # Display response
-            print("Model Response:")
-            print(response)
-            print("-" * 70)
-            print()
-            
-        except KeyboardInterrupt:
-            print("\n\nInterrupted by user. Goodbye!")
-            break
-        except Exception as e:
-            print(f"\nError: {e}\n")
-            continue
+#prepare the input data
+#Use the same format as the training dataset
+sequence = "<[<⟨{(<[(("
 
-# ============================================================================
-# Batch Inference Example
-# ============================================================================
-def batch_inference_examples():
-    """Run inference on example sequences."""
-    print("=" * 70)
-    print("Dyck Sequence Completion - Example Inferences")
-    print("=" * 70)
-    
-    examples = [
-        "{{[{⟨⟦({[{(⟨{[(⟨(<<{",
-        "[⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨",
-        "⟨⟨⟨⟨([<<⟨(⟨[<⟨⟦⟨⟨[([",
-        "⟨<[{{{{({[⟦⟨[<{<{<⟨<",
-    ]
-    
-    for i, partial_seq in enumerate(examples, 1):
-        print(f"\nExample {i}: {partial_seq}")
-        print("-" * 70)
-        
-        response = complete_dyck_sequence(partial_seq)
-        print("Model Response:")
-        print(response)
-        print("=" * 70)
+# List bracket pairs so the model knows each opening bracket has one closing pair (e.g. ⟦/⟧)
+bracket_list = ", ".join(f"{o}/{c}" for o, c in BRACKET_PAIRS)
+prompt = (
+    f"Bracket pairs (opening/closing): {bracket_list}.\n"
+    f"Complete the following Dyck sequence: {sequence}"
+)
+messages = [
+    {"role": "user", "content": prompt}
+]
 
-# ============================================================================
-# Main
-# ============================================================================
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1:
-        # Single inference mode
-        partial_sequence = sys.argv[1]
-        print(f"Input sequence: {partial_sequence}\n")
-        print("Generating completion...\n")
-        response = complete_dyck_sequence(partial_sequence)
-        print("=" * 70)
-        print("Model Response:")
-        print("=" * 70)
-        print(response)
-    elif len(sys.argv) > 1 and sys.argv[1] == "--examples":
-        # Run example inferences
-        batch_inference_examples()
-    else:
-        # Interactive mode
-        interactive_inference()
-import torch
-from unsloth import FastLanguageModel
-
-# ============================================================================
-# Configuration
-# ============================================================================
-BASE_MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
-MODEL_PATH = "results"  # Path to fine-tuned model
-MAX_LENGTH = 512
-
-# ============================================================================
-# Load Fine-tuned Model
-# ============================================================================
-print("Loading fine-tuned model and tokenizer...")
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name=MODEL_PATH,
-    max_seq_length=MAX_LENGTH,
-    dtype=torch.float16,
-    load_in_4bit=True,
+#Apply the chat template and ensure it adds the assistant generation prompt
+user_text = tokenizer.apply_chat_template(
+    messages,
+    tokenize=False,
+    add_generation_prompt=True
 )
 
-# Ensure the pad token is set
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+#Tokenize the user text
+user_tokenized = tokenizer(
+    user_text,
+    truncation=True,
+    max_length=MAX_LENGTH,
+    return_tensors="pt",
+    padding=True,
+    add_special_tokens=True
+)
 
-# Set model to evaluation mode
-FastLanguageModel.for_inference(model)
+#Generate the response
+input_ids = user_tokenized["input_ids"].to(model.device)
+prompt_length = input_ids.shape[1]
+output_ids = model.generate(
+    input_ids,
+    max_new_tokens=1024,
+    do_sample=True,
+    temperature=0.1,
+    top_p=0.9,
+    top_k=10,
+    repetition_penalty=1.25,
+    pad_token_id=tokenizer.pad_token_id,
+)
 
-print("Model loaded successfully! ✓\n")
+# Decode only the newly generated tokens (exclude the prompt)
+generated_ids = output_ids[0][prompt_length:]
+response = tokenizer.decode(generated_ids, skip_special_tokens=True)
 
-# ============================================================================
-# Inference Function
-# ============================================================================
-def complete_dyck_sequence(partial_sequence, max_new_tokens=256, temperature=0.8, top_p=0.95):
-    """
-    Complete a partial Dyck sequence using the fine-tuned model.
-    
-    Args:
-        partial_sequence: The partial Dyck sequence to complete
-        max_new_tokens: Maximum number of tokens to generate
-        temperature: Sampling temperature (lower = more deterministic)
-        top_p: Nucleus sampling parameter
-    
-    Returns:
-        The model's generated response (reasoning + completion)
-    """
-    # Format the input as a chat message (matching training format)
-    user_message = (
-        f"Complete the following Dyck language sequence by adding the minimal necessary closing brackets.\n\n"
-        f"Sequence: {partial_sequence}\n\n"
-        f"Rules:\n"
-        f"- Add only the closing brackets needed to match all unmatched opening brackets\n"
-        f"- Do not add any extra bracket pairs beyond what is required\n\n"
-        f"Provide only the complete valid sequence."
-    )
-    
-    # Format as messages for chat template
-    messages = [
-        {"role": "user", "content": user_message}
-    ]
-    
-    # Apply chat template
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-    
-    # Tokenize
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=MAX_LENGTH
-    ).to(model.device)
-    
-    # Generate
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            do_sample=True,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-    
-    # Decode only the generated part (excluding the input prompt)
-    generated_text = tokenizer.decode(
-        outputs[0][inputs["input_ids"].shape[1]:],
-        skip_special_tokens=True
-    )
-    
-    return generated_text.strip()
+#Print the response
+print(response)
 
-# ============================================================================
-# Interactive Inference
-# ============================================================================
-def interactive_inference():
-    """Run interactive inference session."""
-    print("=" * 70)
-    print("Dyck Sequence Completion - Interactive Inference")
-    print("=" * 70)
-    print("Enter a partial Dyck sequence to complete.")
-    print("Type 'quit' or 'exit' to stop.\n")
-    
-    while True:
-        try:
-            # Get user input
-            partial_seq = input("Enter partial Dyck sequence: ").strip()
-            
-            if partial_seq.lower() in ['quit', 'exit', 'q']:
-                print("\nGoodbye!")
-                break
-            
-            if not partial_seq:
-                print("Please enter a valid sequence.\n")
-                continue
-            
-            print("\nGenerating completion...")
-            print("-" * 70)
-            
-            # Generate response
-            response = complete_dyck_sequence(partial_seq)
-            
-            # Display response
-            print("Model Response:")
-            print(response)
-            print("-" * 70)
-            print()
-            
-        except KeyboardInterrupt:
-            print("\n\nInterrupted by user. Goodbye!")
-            break
-        except Exception as e:
-            print(f"\nError: {e}\n")
-            continue
+#Save the response to a file (only the model's response, not prompt + response)
+with open(OUTPUT_PATH, 'a', encoding='utf-8') as f:
+    f.write(json.dumps({"sequence": sequence, "response": response}, ensure_ascii=False) + '\n')
 
-# ============================================================================
-# Batch Inference Example
-# ============================================================================
-def batch_inference_examples():
-    """Run inference on example sequences."""
-    print("=" * 70)
-    print("Dyck Sequence Completion - Example Inferences")
-    print("=" * 70)
-    
-    examples = [
-        "{{[{⟨⟦({[{(⟨{[(⟨(<<{",
-        "[⟨([<⟨{<⟦[{[<⟨<⟨⟦⟨{⟨",
-        "⟨⟨⟨⟨([<<⟨(⟨[<⟨⟦⟨⟨[([",
-        "⟨<[{{{{({[⟦⟨[<{<{<⟨<",
-    ]
-    
-    for i, partial_seq in enumerate(examples, 1):
-        print(f"\nExample {i}: {partial_seq}")
-        print("-" * 70)
-        
-        response = complete_dyck_sequence(partial_seq)
-        print("Model Response:")
-        print(response)
-        print("=" * 70)
 
-# ============================================================================
-# Main
-# ============================================================================
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1:
-        # Single inference mode
-        partial_sequence = sys.argv[1]
-        print(f"Input sequence: {partial_sequence}\n")
-        print("Generating completion...\n")
-        response = complete_dyck_sequence(partial_sequence)
-        print("=" * 70)
-        print("Model Response:")
-        print("=" * 70)
-        print(response)
-    elif len(sys.argv) > 1 and sys.argv[1] == "--examples":
-        # Run example inferences
-        batch_inference_examples()
-    else:
-        # Interactive mode
-        interactive_inference()

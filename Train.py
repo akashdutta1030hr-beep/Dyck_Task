@@ -11,7 +11,8 @@ from transformers import TrainingArguments, Trainer, DataCollatorForLanguageMode
 MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 DATA_PATH = "conversation.jsonl"
 OUTPUT_DIR = "results"
-MAX_LENGTH = 512
+MAX_LENGTH = 2048
+DATASET_SIZE = 10000  # conversation.jsonl line count (10k); step schedule tuned for this
 
 # ============================================================================
 # Model Setup
@@ -74,16 +75,19 @@ def preprocess(example):
     
     Dataset Structure (JSONL format):
     Each line is a JSON array: [{"role": "user", ...}, {"role": "assistant", ...}]
+    - Assistant has TWO fields: reasoning_content (reasoning) + content (answer)
     
     Training Method:
     - Input: user's content (the question/task)
-    - Output: assistant's reasoning_content (step-by-step thoughts + final answer)
+    - Output: {reasoning}\n\nFINAL ANSWER: {answer}
     - Loss: computed ONLY on assistant tokens
     - User tokens are ignored in loss calculation (label = -100)
     
-    Note: reasoning_content already includes the complete response with the final answer.
+    This teaches the model to:
+    1. Generate step-by-step reasoning
+    2. Provide a clearly delimited final answer
     
-    This teaches the model: P(reasoning + answer | user_input)
+    Format: P(reasoning + "FINAL ANSWER:" + answer | user_input)
     """
     # Parse conversation from JSONL
     # IMPORTANT: When load_dataset("jsonl", ...) loads a JSONL file, it stores each line
@@ -134,19 +138,21 @@ def preprocess(example):
     # INPUT: User's content (the question/task)
     user_content = user_msg.get("content", "")
 
-    # OUTPUT: Assistant's content (reasoning + completion)
+    # OUTPUT: Assistant's content (reasoning + completion with clear delimiter)
     # - reasoning_content: step-by-step reasoning (e.g., "# Thought 1: ...")
-    #   NOTE: reasoning_content already includes the final answer at the end
     # - content: the final completion/answer (standalone)
+    # 
+    # Format: {reasoning}\n\nFINAL ANSWER: {answer}
+    # This teaches the model to provide both reasoning AND a clearly delimited answer
     assistant_reasoning = assistant_msg.get("reasoning_content", "").strip()
     assistant_completion = assistant_msg.get("content", "").strip()
     
-    # Use reasoning_content if available (it already includes the final answer)
-    # Otherwise, use just the completion
-    if assistant_reasoning:
-        assistant_content = assistant_reasoning
+    # Combine reasoning + answer with clear delimiter
+    if assistant_reasoning and assistant_completion:
+        assistant_content = f"{assistant_reasoning}\n\nFINAL ANSWER: {assistant_completion}"
     else:
-        assistant_content = assistant_completion
+        # Fallback: use whichever is available
+        assistant_content = assistant_completion or assistant_reasoning
     
     # ========================================================================
     # Format for Chat Template
@@ -177,7 +183,7 @@ def preprocess(example):
         user_text,
         truncation=True,
         max_length=MAX_LENGTH,
-        padding=False,
+        padding=True,
         add_special_tokens=True
     )
     assistant_start_idx = len(user_tokenized["input_ids"])
@@ -208,7 +214,19 @@ def preprocess(example):
         if input_ids[i] != tokenizer.pad_token_id:
             labels[i] = input_ids[i]
     
+    # Pad to MAX_LENGTH so all samples have the same length (required for batching)
+    pad_id = tokenizer.pad_token_id
+    current_len = len(input_ids)
+    if current_len < MAX_LENGTH:
+        padding_len = MAX_LENGTH - current_len
+        input_ids = input_ids + [pad_id] * padding_len
+        labels = labels + [-100] * padding_len  # ignore padding in loss
+        attention_mask = [1] * current_len + [0] * padding_len
+    else:
+        attention_mask = [1] * MAX_LENGTH
+    tokenized["input_ids"] = input_ids
     tokenized["labels"] = labels
+    tokenized["attention_mask"] = attention_mask
     return tokenized
 
 # ============================================================================
@@ -219,7 +237,7 @@ train_dataset = train_dataset.map(
     preprocess,
     remove_columns=train_dataset.column_names,
     desc="Preprocessing train",
-    num_proc=1,
+    num_proc=8,
 )
 
 print("Preprocessing evaluation dataset...")
@@ -227,7 +245,7 @@ eval_dataset = eval_dataset.map(
     preprocess,
     remove_columns=eval_dataset.column_names,
     desc="Preprocessing eval",
-    num_proc=1,
+    num_proc=8,
 )
 
 # Validate preprocessing
@@ -255,30 +273,30 @@ data_collator = DataCollatorForLanguageModeling(
 )
 
 # ============================================================================
-# Training Arguments - Optimized Configuration
+# Training Arguments - Optimized for 10k Dataset
 # ============================================================================
 # Model: 1.5B parameters (DeepSeek-R1-Distill-Qwen-1.5B)
-# Dataset: ~10,000 samples (small dataset)
+# Dataset: ~10,000 samples -> ~9,500 train / ~500 eval, ~148 steps per epoch
 # Method: LoRA fine-tuning (parameter-efficient)
 # ============================================================================
 
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     eval_strategy="steps",
-    eval_steps=50,
-    save_steps=250,
-    logging_steps=50,
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    gradient_accumulation_steps=8,
-    num_train_epochs=1,
-    learning_rate=1e-4,
+    eval_steps=50,                   # Eval ~3x per epoch with 10k dataset
+    save_steps=50,
+    logging_steps=30,
+    per_device_train_batch_size=16,   # Increased from 8 (larger batch for stability)
+    per_device_eval_batch_size=4,     # Smaller than train to avoid OOM during eval (eval runs with train state in VRAM)
+    gradient_accumulation_steps=4,    # Reduced from 8 (maintains effective batch size ~64)
+    num_train_epochs=2,
+    learning_rate=2e-5,              # Keep current LR (don't reduce)
     lr_scheduler_type="cosine",
-    warmup_ratio=0.1,
-    weight_decay=0.05,
+    warmup_ratio=0.1,                # Reduced from 0.25 (0.15 was already high, 0.1 is reasonable)
+    weight_decay=0.005,
     bf16=True,
-    max_grad_norm=1.0,
-    save_total_limit=3,
+    max_grad_norm=1.0,               # Reverted to 1.0 (reasonable value)
+    save_total_limit=1,
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
@@ -368,3 +386,4 @@ if __name__ == "__main__":
 
     print("Training complete! 🎉")
     
+
