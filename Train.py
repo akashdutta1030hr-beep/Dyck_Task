@@ -11,7 +11,6 @@ from transformers import TrainingArguments, Trainer, DataCollatorForLanguageMode
 MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 DATA_PATH = "conversation.jsonl"
 OUTPUT_DIR = "results"
-OUTPUT_DIR_MERGED = "results_merged"
 MAX_LENGTH = 2048
 
 # ============================================================================
@@ -210,16 +209,16 @@ data_collator = DataCollatorForLanguageModeling(
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     eval_strategy="steps",
-    eval_steps=120,
-    save_steps=120,
-    logging_steps=40,
+    eval_steps=50,
+    save_steps=50,
+    logging_steps=15,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=4,
     gradient_accumulation_steps=4,
-    num_train_epochs=4,
-    learning_rate=1e-5,
+    num_train_epochs=1,
+    learning_rate=1e-4,
     lr_scheduler_type="cosine",
-    warmup_ratio=0.08,
+    warmup_ratio=0.05,
     weight_decay=0.005,
     bf16=True,
     max_grad_norm=1.0,
