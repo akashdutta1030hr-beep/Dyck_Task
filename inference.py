@@ -17,7 +17,11 @@ TEMPERATURE = 0.05       # Lower = more deterministic (try 0.01–0.1)
 MAX_NEW_TOKENS = 256     # Cap length; training used reasoning + FINAL ANSWER
 REPETITION_PENALTY = 1.1
 TOP_P = 0.9
-EXTRACT_ANSWER = True   # If True, extract "FINAL ANSWER: ..." from response
+EXTRACT_ANSWER = True
+
+BRACKET_PAIRS = [("(", ")"), ("[", "]"), ("{", "}"), ("<", ">"), ("⟨", "⟩"), ("⟦", "⟧"), ("⦃", "⦄"), ("⦅", "⦆")]
+OPEN_TO_CLOSE = {o: c for o, c in BRACKET_PAIRS}
+BRACKET_CHARS = set("()[]{}<>⟨⟩⟦⟧⦃⦄⦅⦆")
 
 
 def format_prompt(sequence: str) -> str:
@@ -47,26 +51,23 @@ def extract_answer(response: str) -> str:
         part = part.split("\n")[0].strip()
         if part:
             return part
-    # Else: take last line that looks like only brackets (optional)
-    bracket_chars = set("()[]{}<>⟨⟩⟦⟧⦃⦄⦅⦆")
     for line in reversed(response.split("\n")):
         line = line.strip()
-        if line and all(c in bracket_chars or c.isspace() for c in line):
+        if line and all(c in BRACKET_CHARS or c.isspace() for c in line):
             return line.replace(" ", "")
     return response.strip()
 
 
 def main():
     print("Loading model from Hugging Face...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL_ID,
         torch_dtype=torch.float16,
-        device_map="auto",
-        trust_remote_code=True,
+        device_map="auto"
     )
     model = PeftModel.from_pretrained(model, MODEL_ID)
     model.eval()
@@ -104,18 +105,19 @@ def main():
     ).strip()
     answer = extract_answer(raw_response)
 
+
     print("=" * 50)
     print("INPUT SEQUENCE:")
     print("=" * 50)
     print(sequence)
     print()
     print("=" * 50)
-    print("MODEL OUTPUT (raw):")
+    print("MODEL OUTPUT:")
     print("=" * 50)
     print(raw_response[:500] + ("..." if len(raw_response) > 500 else ""))
     print()
     print("=" * 50)
-    print("EXTRACTED ANSWER (use this as the Dyck completion):")
+    print("FINAL ANSWER (Dyck completion):")
     print("=" * 50)
     print(answer)
     print()
