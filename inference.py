@@ -1,107 +1,134 @@
-import torch
+"""
+Dyck inference: load Hugging Face model and run completion.
+Matches inference.ipynb (Colab). Uses transformers + PEFT.
+"""
 import json
-from unsloth import FastLanguageModel
-from tqdm import tqdm
-import re
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
-# ============================================================================
-# Configuration
-# ============================================================================
-BASE_MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
-MODEL_PATH = "results"  # Path to fine-tuned model
-# Use same cap as training so model context supports full sequences
+MODEL_ID = "akashdutta1030/dyck-deepseek-r1-lora"
+BASE_MODEL_ID = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 MAX_LENGTH = 2048
-DATASET_PATH = "conversation.jsonl"  # 10k samples (match generator default)
 OUTPUT_PATH = "inference_results.jsonl"
 
-# Bracket pairs (opening, closing) used in Dyck sequences - same as generator
-BRACKET_PAIRS = [
-    ("(", ")"),
-    ("[", "]"),
-    ("{", "}"),
-    ("<", ">"),
-    ("⟨", "⟩"),
-    ("⟦", "⟧"),
-    ("⦃", "⦄"),
-    ("⦅", "⦆"),
-]
-
-# ============================================================================
-# Load Fine-tuned Model
-# ============================================================================
-print("Loading fine-tuned model and tokenizer...")
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name=MODEL_PATH,
-    max_seq_length=MAX_LENGTH,
-    dtype=torch.float16,
-    load_in_4bit=True,
-)
-
-# Ensure the pad token is set
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-# Set model to evaluation mode
-FastLanguageModel.for_inference(model)
-
-print("Model loaded successfully! ✓\n")
-
-# ============================================================================
-
-#prepare the input data
-#Use the same format as the training dataset
-sequence = "<[<⟨{(<[(("
-
-# List bracket pairs so the model knows each opening bracket has one closing pair (e.g. ⟦/⟧)
-bracket_list = ", ".join(f"{o}/{c}" for o, c in BRACKET_PAIRS)
-prompt = (
-    f"Bracket pairs (opening/closing): {bracket_list}.\n"
-    f"Complete the following Dyck sequence: {sequence}"
-)
-messages = [
-    {"role": "user", "content": prompt}
-]
-
-#Apply the chat template and ensure it adds the assistant generation prompt
-user_text = tokenizer.apply_chat_template(
-    messages,
-    tokenize=False,
-    add_generation_prompt=True
-)
-
-#Tokenize the user text
-user_tokenized = tokenizer(
-    user_text,
-    truncation=True,
-    max_length=MAX_LENGTH,
-    return_tensors="pt",
-    padding=True,
-    add_special_tokens=True
-)
-
-#Generate the response
-input_ids = user_tokenized["input_ids"].to(model.device)
-prompt_length = input_ids.shape[1]
-output_ids = model.generate(
-    input_ids,
-    max_new_tokens=1024,
-    do_sample=True,
-    temperature=0.1,
-    top_p=0.9,
-    top_k=10,
-    repetition_penalty=1.25,
-    pad_token_id=tokenizer.pad_token_id,
-)
-
-# Decode only the newly generated tokens (exclude the prompt)
-generated_ids = output_ids[0][prompt_length:]
-response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-#Print the response
-print(response)
-
-#Save the response to a file (only the model's response, not prompt + response)
-with open(OUTPUT_PATH, 'a', encoding='utf-8') as f:
-    f.write(json.dumps({"sequence": sequence, "response": response}, ensure_ascii=False) + '\n')
+# Inference controls (tune to match training / reduce rambling)
+TEMPERATURE = 0.05       # Lower = more deterministic (try 0.01–0.1)
+MAX_NEW_TOKENS = 256     # Cap length; training used reasoning + FINAL ANSWER
+REPETITION_PENALTY = 1.1
+TOP_P = 0.9
+EXTRACT_ANSWER = True   # If True, extract "FINAL ANSWER: ..." from response
 
 
+def format_prompt(sequence: str) -> str:
+    """Same format as generator._format_question (and training)."""
+    return f"""Complete the following Dyck language sequence by adding the minimal necessary closing brackets.
+
+Sequence: {sequence}
+
+Rules:
+- Add only the closing brackets needed to match all unmatched opening brackets
+- Do not add any extra bracket pairs beyond what is required
+
+Provide only the complete valid sequence."""
+
+
+def extract_answer(response: str) -> str:
+    """
+    Extract the Dyck completion from model output.
+    Training format: reasoning + "FINAL ANSWER: " + full_sequence.
+    """
+    if not EXTRACT_ANSWER:
+        return response.strip()
+    # Prefer text after "FINAL ANSWER:" (same as training)
+    if "FINAL ANSWER:" in response:
+        part = response.split("FINAL ANSWER:")[-1].strip()
+        # Take first line or up to next obvious end
+        part = part.split("\n")[0].strip()
+        if part:
+            return part
+    # Else: take last line that looks like only brackets (optional)
+    bracket_chars = set("()[]{}<>⟨⟩⟦⟧⦃⦄⦅⦆")
+    for line in reversed(response.split("\n")):
+        line = line.strip()
+        if line and all(c in bracket_chars or c.isspace() for c in line):
+            return line.replace(" ", "")
+    return response.strip()
+
+
+def main():
+    print("Loading model from Hugging Face...")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL_ID,
+        torch_dtype=torch.float16,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model = PeftModel.from_pretrained(model, MODEL_ID)
+    model.eval()
+    print("Model loaded.\n")
+
+    sequence = "<[<⟨{(<[(("
+    prompt = format_prompt(sequence)
+    messages = [{"role": "user", "content": prompt}]
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    inputs = tokenizer(
+        text,
+        return_tensors="pt",
+        truncation=True,
+        max_length=MAX_LENGTH,
+    ).to(model.device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=True,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            repetition_penalty=REPETITION_PENALTY,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+
+    raw_response = tokenizer.decode(
+        outputs[0][inputs["input_ids"].shape[1]:],
+        skip_special_tokens=True,
+    ).strip()
+    answer = extract_answer(raw_response)
+
+    print("=" * 50)
+    print("INPUT SEQUENCE:")
+    print("=" * 50)
+    print(sequence)
+    print()
+    print("=" * 50)
+    print("MODEL OUTPUT (raw):")
+    print("=" * 50)
+    print(raw_response[:500] + ("..." if len(raw_response) > 500 else ""))
+    print()
+    print("=" * 50)
+    print("EXTRACTED ANSWER (use this as the Dyck completion):")
+    print("=" * 50)
+    print(answer)
+    print()
+    print("=" * 50)
+    print("Result (JSON):")
+    print("=" * 50)
+    result = {"sequence": sequence, "response": raw_response, "answer": answer}
+    print(json.dumps({"sequence": sequence, "response": raw_response, "answer": answer}, ensure_ascii=False, indent=2))
+
+    with open(OUTPUT_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(result, ensure_ascii=False) + "\n")
+    print(f"\nAppended to {OUTPUT_PATH}")
+
+
+if __name__ == "__main__":
+    main()

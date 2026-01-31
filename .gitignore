@@ -1,3 +1,9 @@
+# Dataset (large; generate with generator.py)
+conversation.jsonl
+
+# Inference output
+inference_results.jsonl
+
 # Python
 __pycache__/
 *.py[cod]
@@ -8,63 +14,23 @@ __pycache__/
 .eggs/
 dist/
 build/
-*.egg
 
-# Virtual Environment
+# Virtual environment
 venv/
 env/
-ENV/
 .venv
-venv*/
+ENV/
 
-# Jupyter Notebooks
+# Jupyter
 .ipynb_checkpoints/
-*.ipynb_checkpoints
 
-# Datasets (large files)
-conversation.jsonl
-*.jsonl
-*.json
-dyck_language_with_reasoning_dataset.json
-
-# Model outputs and checkpoints
+# Training / model outputs
 results/
-output/
-checkpoints/
-*.safetensors
-*.bin
-*.pt
-*.pth
+results_merged/
 
-# Training outputs
-training_loss.png
-logs/
-wandb/
-tensorboard/
-
-# Unsloth cache
-unsloth_compiled_cache/
-*.cache
-
-# IDE / Editor
+# IDE / OS
 .idea/
 .vscode/
+.DS_Store
 *.swp
-*.swo
 *~
-.DS_Store
-*.code-workspace
-
-# OS
-Thumbs.db
-.DS_Store
-
-# Temporary files
-*.tmp
-*.log
-*.bak
-
-# Test files (optional - uncomment if you want to ignore)
-# test_*.py
-# *_test.py
-conversation.jsonl

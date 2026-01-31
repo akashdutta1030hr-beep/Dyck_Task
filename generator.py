@@ -2,7 +2,6 @@
 
 import random
 import uuid
-import sys
 import json
 
 class Data:
@@ -57,11 +56,7 @@ class DyckLanguageGenerator:
             ("(", ")"),
             ("[", "]"),
             ("{", "}"),
-            ("<", ">"),
-            ("⟨", "⟩"),
-            ("⟦", "⟧"),
-            ("⦃", "⦄"),
-            ("⦅", "⦆")
+            ("<", ">")
         ]
 
     def generate(
@@ -224,8 +219,11 @@ Provide only the complete valid sequence."""
 
 
 if __name__ == "__main__":
+    # Clear file once before the loop (do not clear inside the loop)
+    with open("conversation.jsonl", "w", encoding="utf-8") as f:
+        pass
 
-    for i in range(10000):
+    for i in range(40000):
         task_id = random.randint(0, 100000000)
         print(f"Generated task_id: {task_id}")
 
@@ -235,9 +233,9 @@ if __name__ == "__main__":
         # Generate the task
         task = generator.generate(
             seed=task_id,
-            n_types=6,  # Number of bracket types
-            total_length=40,  # Total sequence length
-            to_fill_length=20,  # Length to fill
+            n_types=4,  # Number of bracket types
+            total_length=20,  # Total sequence length
+            to_fill_length=10,  # Length to fill
             nesting_depth=3,  # Minimum nesting depth
             max_attempts=1000  # Max attempts to generate a valid sequence
         )
@@ -252,11 +250,7 @@ if __name__ == "__main__":
             ("(", ")"),
             ("[", "]"),
             ("{", "}"),
-            ("<", ">"),
-            ("⟨", "⟩"),
-            ("⟦", "⟧"),
-            ("⦃", "⦄"),
-            ("⦅", "⦆")
+            ("<", ">")
         ]
         open_brackets = [bracket[0] for bracket in brackets]
         clos_brackets = [bracket[1] for bracket in brackets]
@@ -285,5 +279,5 @@ if __name__ == "__main__":
                 "reasoning_content": f"{reasoning}"
             }
         ]
-        with open(f"conversation.jsonl", "a", encoding="utf-8") as f:
+        with open("conversation.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(conversation, ensure_ascii=False) + "\n")

@@ -1,47 +1,21 @@
-# Dyck Sequence Completion with Reasoning - Dependencies
-# Updated: 2026-01-28
-# Python 3.10+ recommended
-
-# ============================================================================
-# Core Deep Learning
-# ============================================================================
-torch>=2.0.0                    # PyTorch with GPU support
-transformers>=4.35.0            # HuggingFace Transformers
-
-# ============================================================================
-# Efficient Fine-tuning (Unsloth + dependencies)
-# ============================================================================
-unsloth[colab-new]>=2024.1      # Unsloth for optimized LoRA/QLoRA training
-bitsandbytes>=0.41.0            # 4-bit/8-bit quantization
-peft>=0.6.0                     # Parameter-Efficient Fine-Tuning (LoRA)
-accelerate>=0.24.0              # Distributed training acceleration
-
-# ============================================================================
-# Data Processing
-# ============================================================================
-datasets>=2.14.0                # HuggingFace Datasets library
-numpy>=1.24.0                   # Numeric computing
-
-# ============================================================================
-# Utilities
-# ============================================================================
-tqdm>=4.65.0                    # Progress bars for inference
-matplotlib>=3.7.0               # Training loss visualization
-
-# ============================================================================
-# Inference (vLLM for fast offline inference)
-# ============================================================================
-vllm>=0.6.0                     # vLLM for high-throughput inference
-
-# ============================================================================
-# Optional (may be required by some dependencies)
-# ============================================================================
-trl>=0.7.0                      # Transformer Reinforcement Learning
-
-# ============================================================================
-# Installation
-# ============================================================================
+# Dyck Task - Python 3.10+
 # pip install -r requirements.txt
-#
-# For GPU support, ensure CUDA-compatible PyTorch is installed:
-# pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+# Core
+torch>=2.0.0
+transformers>=4.35.0
+
+# Training (Unsloth + LoRA)
+unsloth[colab-new]>=2024.1
+bitsandbytes>=0.41.0
+peft>=0.6.0
+accelerate>=0.24.0
+
+# Data
+datasets>=2.14.0
+numpy>=1.24.0
+
+# Training utils
+matplotlib>=3.7.0
+
+# Inference uses transformers + peft (no vLLM)
