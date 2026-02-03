@@ -1,5 +1,6 @@
 # Dataset (large; generate with generator.py)
 conversation.jsonl
+example.jsonl
 
 # Inference output
 inference_results.jsonl
@@ -27,6 +28,13 @@ ENV/
 # Training / model outputs
 results/
 results_merged/
+checkpoint-*/
+*.png
+
+# Hugging Face / tokens
+.env
+*.token
+wandb/
 
 # IDE / OS
 .idea/
@@ -34,3 +42,12 @@ results_merged/
 .DS_Store
 *.swp
 *~
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

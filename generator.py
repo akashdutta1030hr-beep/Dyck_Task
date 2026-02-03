@@ -215,7 +215,11 @@ Rules:
 - Add only the closing brackets needed to match all unmatched opening brackets
 - Do not add any extra bracket pairs beyond what is required
 
-Provide only the complete valid sequence."""
+Response format (use only this format; no extra prose, no Qwen/DeepSeek-style commentary):
+- Use "# Thought N: ..." for each character or step (e.g. opening → push, closing → pop, stack state).
+- Then "# So we add closing brackets one by one in this order:" and "# Step k: add 'X'." for each closing bracket.
+- End with "FINAL ANSWER: " followed by the complete Dyck sequence only.
+Do not add conversational text, "Wait...", "Let me recount", or other base-model-style phrasing."""
 
 
 if __name__ == "__main__":
@@ -223,7 +227,7 @@ if __name__ == "__main__":
     with open("conversation.jsonl", "w", encoding="utf-8") as f:
         pass
 
-    for i in range(40000):
+    for i in range(60000):
         task_id = random.randint(0, 100000000)
         print(f"Generated task_id: {task_id}")
 
@@ -246,26 +250,39 @@ if __name__ == "__main__":
         stack = []
         reasoning = ""
         sequence = task.metadata['question_sequence']
+        closing_sequence = task.metadata['closing_sequence']
+        full_sequence = task.metadata['full_sequence']
         brackets = [
             ("(", ")"),
             ("[", "]"),
             ("{", "}"),
             ("<", ">")
         ]
-        open_brackets = [bracket[0] for bracket in brackets]
-        clos_brackets = [bracket[1] for bracket in brackets]
-        brackets_dict = {bracket[0]: bracket[1] for bracket in brackets}
-        for i, char in enumerate(sequence):
-            if char in open_brackets:
-                stack.append(brackets_dict[char])
-                reasoning += f"# Thought {i + 1}: {i + 1}th character is an opening bracket '{char}', pushing it onto the stack. Stack: {stack}\n"
-            elif char in clos_brackets:
-                if stack:
-                    open_bracket = stack[-1]
-                    stack.pop()
-                    reasoning += f"# Thought {i + 1}: {i + 1}th character is a closing bracket '{char}', matching it with '{open_bracket}' and popping from the stack. Stack: {stack}\n"
-        reasoning += f"# Thought {i + 1}: All brackets are matched. The Dyck sequence is now complete. Stack: {stack}\n"
-        reasoning += f"Here is the completed Dyck sequence: {task.metadata['full_sequence']}\n"
+        open_brackets = [b[0] for b in brackets]
+        clos_brackets = [b[1] for b in brackets]
+        open_to_close = {b[0]: b[1] for b in brackets}
+
+        # Step-by-step: process only the given prefix (opening = push closing onto stack; closing = match and pop)
+        for step, char in enumerate(sequence, start=1):
+            if char in open_to_close:
+                stack.append(open_to_close[char])
+                reasoning += f"# Thought {step}: '{char}' is opening → push closing '{open_to_close[char]}' onto stack. Stack: {stack}\n"
+            elif char in clos_brackets and stack and stack[-1] == char:
+                stack.pop()
+                reasoning += f"# Thought {step}: '{char}' is closing → matches stack top, pop. Stack: {stack}\n"
+            elif char in clos_brackets and stack:
+                # Mismatch: should not happen in valid prefix-only input; pop anyway for robustness
+                stack.pop()
+                reasoning += f"# Thought {step}: '{char}' closing → pop. Stack: {stack}\n"
+
+        # Summary: stack = closings we must add. Then step-by-step "add X" so model sees exact closing order.
+        reasoning += f"# Thought {step + 1}: All input processed. Stack (closings to add, top first): {stack}\n"
+        reasoning += f"# So we add closing brackets one by one in this order:\n"
+        for k, close_char in enumerate(closing_sequence, start=1):
+            reasoning += f"# Step {k}: add '{close_char}'.\n"
+        reasoning += f"# Closing sequence added: {closing_sequence}\n"
+        reasoning += f"# Complete Dyck sequence (prefix + closing): {full_sequence}\n"
+        reasoning += f"Verification — full sequence: {full_sequence}\n"
         # print(reasoning)
         conversation = [
             {

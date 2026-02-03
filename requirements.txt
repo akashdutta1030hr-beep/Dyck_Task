@@ -6,16 +6,23 @@ torch>=2.0.0
 transformers>=4.35.0
 
 # Training (Unsloth + LoRA)
-unsloth[colab-new]>=2024.1
+# Install from source for latest: pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+unsloth>=2024.1
 bitsandbytes>=0.41.0
-peft>=0.6.0
-accelerate>=0.24.0
+peft>=0.7.0
+accelerate>=0.25.0
 
 # Data
 datasets>=2.14.0
 numpy>=1.24.0
 
-# Training utils
+# Hugging Face (upload models)
+huggingface-hub>=0.19.0
+
+# Visualization
 matplotlib>=3.7.0
 
-# Inference uses transformers + peft (no vLLM)
+# Optional: faster tokenization
+# tokenizers>=0.15.0
+
+# Inference uses transformers + peft

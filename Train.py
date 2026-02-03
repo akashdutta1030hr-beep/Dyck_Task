@@ -1,5 +1,6 @@
 import torch
 import json
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from datasets import Dataset
 from unsloth import FastLanguageModel
@@ -11,7 +12,17 @@ from transformers import TrainingArguments, Trainer, DataCollatorForLanguageMode
 MODEL_NAME = "unsloth/DeepSeek-R1-Distill-Qwen-1.5B"
 DATA_PATH = "conversation.jsonl"
 OUTPUT_DIR = "results"
-MAX_LENGTH = 2048
+MAX_LENGTH = 768  # Must be >= dataset max token length. Run: python check_dataset_seq_len.py
+
+# Hugging Face: upload adapter after training (set repo name to enable).
+HF_REPO = None  # e.g. "your-username/dyck-1.5b-lora"
+
+# Stronger learning signal on the final answer (reasoning is long, answer is short).
+# Tokens from "FINAL ANSWER: " onward get this weight; reasoning tokens get 1.0.
+ANSWER_LOSS_WEIGHT = 5.0
+
+# Response style: training target is dataset format only (# Thought N, # Step k: add 'X', FINAL ANSWER: ...).
+# Not Qwen/DeepSeek-style prose; generator and inference prompts enforce dataset style.
 
 # ============================================================================
 # Model Setup
@@ -27,6 +38,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
+# LoRA: r=64 for 60k dataset (good capacity); alpha=128, dropout=0.05 for stability on larger data.
 model = FastLanguageModel.get_peft_model(
     model,
     r=64,
@@ -35,7 +47,7 @@ model = FastLanguageModel.get_peft_model(
         "gate_proj", "up_proj", "down_proj",
     ],
     lora_alpha=128,
-    lora_dropout=0.1,
+    lora_dropout=0.05,
     bias="none",
     use_gradient_checkpointing=True,
     random_state=42,
@@ -55,10 +67,10 @@ print(f"Loaded {len(dataset)} samples")
 
 # Split dataset into train and eval
 dataset = dataset.shuffle(seed=42)
-dataset = dataset.train_test_split(test_size=0.05)
+dataset = dataset.train_test_split(test_size=0.04)
 train_dataset = dataset["train"]
 eval_dataset = dataset["test"]
-print(f"Train samples: {len(train_dataset)}, Eval samples: {len(eval_dataset)}")
+print(f"Train samples {len(train_dataset)}, eval samples {len(eval_dataset)}")
 
 # ============================================================================
 # Preprocessing Function
@@ -125,7 +137,7 @@ def preprocess(example):
         user_text,
         truncation=True,
         max_length=MAX_LENGTH,
-        padding=True,
+        padding=False,  # No padding: we need actual user length for assistant_start_idx
         add_special_tokens=True
     )
     assistant_start_idx = len(user_tokenized["input_ids"])
@@ -134,37 +146,54 @@ def preprocess(example):
         truncation=True,
         max_length=MAX_LENGTH,
         padding=False,
-        add_special_tokens=True
+        add_special_tokens=True,
+        return_offsets_mapping=True,
     )
-    
+    offset_mapping = tokenized.pop("offset_mapping")
+
     input_ids = tokenized["input_ids"]
 
     # Step 3: Create labels
     # - User tokens: label = -100 (ignored in loss calculation)
     # - Assistant tokens: label = actual token ID (loss computed here)
     labels = [-100] * len(input_ids)
-    
+
     # Adjust start index if truncation occurred
     assistant_start_idx = min(assistant_start_idx, len(input_ids))
-    
+
     # Mark assistant tokens for training
-    # Loss is computed only on these tokens (includes both reasoning and completion)
     for i in range(assistant_start_idx, len(input_ids)):
         if input_ids[i] != tokenizer.pad_token_id:
             labels[i] = input_ids[i]
-    
+
+    # Step 4: Label weights — stronger signal on "FINAL ANSWER: <sequence>" (answer tokens get ANSWER_LOSS_WEIGHT)
+    label_weights = [1.0] * len(input_ids)
+    answer_start_char = full_text.find("FINAL ANSWER: ")
+    if answer_start_char >= 0 and offset_mapping:
+        answer_start_token = None
+        for idx in range(assistant_start_idx, len(offset_mapping)):
+            if offset_mapping[idx][0] >= answer_start_char:
+                answer_start_token = idx
+                break
+        if answer_start_token is not None:
+            for j in range(assistant_start_idx, len(input_ids)):
+                if labels[j] != -100:
+                    label_weights[j] = ANSWER_LOSS_WEIGHT if j >= answer_start_token else 1.0
+
     pad_id = tokenizer.pad_token_id
     current_len = len(input_ids)
     if current_len < MAX_LENGTH:
         padding_len = MAX_LENGTH - current_len
         input_ids = input_ids + [pad_id] * padding_len
-        labels = labels + [-100] * padding_len  # ignore padding in loss
+        labels = labels + [-100] * padding_len
+        label_weights = label_weights + [0.0] * padding_len
         attention_mask = [1] * current_len + [0] * padding_len
     else:
         attention_mask = [1] * MAX_LENGTH
     tokenized["input_ids"] = input_ids
     tokenized["labels"] = labels
     tokenized["attention_mask"] = attention_mask
+    tokenized["label_weights"] = label_weights
     return tokenized
 
 # ============================================================================
@@ -201,33 +230,87 @@ if len(train_dataset) > 0:
         print(f"  - Assistant tokens (loss computed on): {trainable_labels}")
         print(f"  - User tokens (ignored in loss): {len(sample['input_ids']) - trainable_labels}")
 
-data_collator = DataCollatorForLanguageModeling(
+class DataCollatorWithWeights(DataCollatorForLanguageModeling):
+    """Pads and stacks label_weights so Trainer can use weighted loss."""
+
+    def __call__(self, features):
+        batch = super().__call__(features)
+        if not features or "label_weights" not in features[0]:
+            return batch
+        max_len = batch["input_ids"].shape[1]
+        weights = []
+        for f in features:
+            w = f.get("label_weights", [1.0] * len(f["input_ids"]))
+            if len(w) < max_len:
+                w = w + [0.0] * (max_len - len(w))
+            else:
+                w = w[:max_len]
+            weights.append(w)
+        batch["label_weights"] = torch.tensor(weights, dtype=torch.float32)
+        return batch
+
+
+data_collator = DataCollatorWithWeights(
     tokenizer=tokenizer,
-    mlm=False,  # Causal LM, not masked LM
+    mlm=False,
 )
 
+# Keep training loss low and avoid spike: conservative LR, longer warmup, tight grad clip.
+# With 60k data (~57k train), steps/epoch ~148, 2 epochs ~296 steps; warmup 25% ≈ 74 steps.
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     eval_strategy="steps",
-    eval_steps=50,
-    save_steps=50,
-    logging_steps=15,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=4,
+    eval_steps=100,
+    save_steps=100,
+    logging_steps=10,
+    per_device_train_batch_size=48,
+    per_device_eval_batch_size=12,
     gradient_accumulation_steps=4,
-    num_train_epochs=1,
-    learning_rate=1e-4,
+    num_train_epochs=2,
+    learning_rate=6e-6,
     lr_scheduler_type="cosine",
-    warmup_ratio=0.05,
-    weight_decay=0.005,
+    warmup_ratio=0.25,
+    weight_decay=0.01,
     bf16=True,
-    max_grad_norm=1.0,
+    max_grad_norm=0.5,
     save_total_limit=2,
-    load_best_model_at_end=True,
+    load_best_model_at_end=False,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
+    report_to="none",
 )
-trainer = Trainer(
+
+
+class WeightedLossTrainer(Trainer):
+    """Trainer that weights loss on 'FINAL ANSWER: ...' tokens by ANSWER_LOSS_WEIGHT."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        # Accept kwargs (e.g. num_items_in_batch from Unsloth) so we don't break when the training loop passes extra args.
+        label_weights = inputs.pop("label_weights", None)
+        if label_weights is None:
+            return super().compute_loss(model, inputs, return_outputs=return_outputs)
+
+        labels = inputs.get("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+
+        # Causal LM: predict next token; loss at position i is for predicting labels[i+1]
+        shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+        shift_labels = labels[..., 1:].contiguous().view(-1)
+        shift_weights = label_weights[..., 1:].contiguous().view(-1)
+
+        loss_per_token = F.cross_entropy(
+            shift_logits, shift_labels, ignore_index=-100, reduction="none"
+        )
+        mask = (shift_labels != -100).float()
+        weighted_sum = (loss_per_token * shift_weights * mask).sum()
+        weight_sum = (shift_weights * mask).sum().clamp(min=1e-8)
+        loss = weighted_sum / weight_sum
+
+        return (loss, outputs) if return_outputs else loss
+
+
+trainer = WeightedLossTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
@@ -246,12 +329,26 @@ if __name__ == "__main__":
     print(f"\nSaving LoRA adapter to {OUTPUT_DIR}...")
     model.save_pretrained(OUTPUT_DIR)
     tokenizer.save_pretrained(OUTPUT_DIR)
-    print(f"LoRA adapter saved successfully to {OUTPUT_DIR}")
+    print(f"LoRA adapter saved to {OUTPUT_DIR}")
+    print("Tip: If eval loss spiked then dropped at the end, use the checkpoint with lowest eval_loss from training_loss.png (e.g. results/checkpoint-XXX), not the final run.")
     
-    print(f"\nMerging LoRA with base model and saving to {OUTPUT_DIR_MERGED}...")
-    model.save_pretrained_merged(OUTPUT_DIR_MERGED, tokenizer, save_method="merged_16bit")
-    print(f"Merged model saved successfully to {OUTPUT_DIR_MERGED} (use this path for inference)")
-    
+    # Save merged model (base + LoRA) for inference — single load, equivalent to base+adapter at every layer.
+    # Inference should use dataset-style output only (# Thought N, # Step k, FINAL ANSWER: ...), not Qwen/DeepSeek prose.
+    print("Saving merged model (base + LoRA) for inference...")
+    model.save_pretrained_merged(f"{OUTPUT_DIR}_merged", tokenizer, save_method="merged_16bit")
+    print(f"Merged model saved to {OUTPUT_DIR}_merged")
+
+    if HF_REPO:
+        print(f"Uploading to Hugging Face: {HF_REPO} ...")
+        try:
+            model.push_to_hub(HF_REPO, safe_serialization=True)
+            tokenizer.push_to_hub(HF_REPO)
+            print(f"Upload complete: {HF_REPO}")
+        except Exception as e:
+            print(f"Upload failed: {e}. Run 'huggingface-cli login' or set HF_TOKEN, then re-run or upload manually: huggingface-cli upload {HF_REPO} {OUTPUT_DIR} . --repo-type model")
+    else:
+        print("Set HF_REPO to upload the trained adapter to Hugging Face after training.")
+
     # Evaluate the model after training
     print("\nRunning final evaluation...")
     eval_results = trainer.evaluate()
