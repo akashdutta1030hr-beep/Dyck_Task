@@ -1,61 +1,75 @@
 # Dyck Task
 
-Fine-tune a language model to **complete Dyck sequences** (balanced bracket sequences) with **step-by-step reasoning**.
+**Generate and fine-tune on Dyck-language completion with explicit step-by-step reasoning.**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Hugging Face](https://img.shields.io/badge/HuggingFace-Unsloth-yellow)](https://github.com/unslothai/unsloth)
+
+Formal-language tasks stress **structure and reasoning**, not world knowledge. Dyck languages (balanced bracket sequences) are a clean benchmark: the model must track a stack, emit minimal closings, and explain each step.
+
+This repo is a full pipeline: **synthetic data → length audit → LoRA fine-tune → inference**.
+
+## What this demonstrates
+
+| Skill | Where in repo |
+|-------|----------------|
+| Synthetic dataset design | `generator.py` — reasoning traces + `FINAL ANSWER` format |
+| Training hygiene | `check_dataset_seq_len.py` before setting `MAX_LENGTH` |
+| Efficient fine-tuning | `Train.py` — Unsloth + 4-bit LoRA on Qwen distill |
+| Weighted loss on answer tokens | 5× on `FINAL ANSWER` span — teaches format without ignoring reasoning |
+| Reproducible inference | `inference.py` loads merged weights |
 
 ## Task
 
-Given a prefix of opening brackets, complete it with the **minimal closing brackets** so the full sequence is a valid Dyck word.
+Given a prefix of opening brackets, complete with the **minimal closing brackets** for a valid Dyck word.
 
 **Bracket pairs:** `()`, `[]`, `{}`, `<>`
 
-## Project Structure
+Example output format:
 
-| File | Description |
-|------|-------------|
-| `generator.py` | Generates `conversation.jsonl` (user/assistant with reasoning). |
-| `Train.py` | Fine-tunes [DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-1.5B) using Unsloth (LoRA, 4-bit). |
-| `inference.py` | Loads trained model and runs Dyck completion. |
-| `check_dataset_seq_len.py` | Reports dataset token-length stats; run before training. |
-| `requirements.txt` | Python dependencies. |
+```text
+# Thought 1: ...
+# Step 1: add ']'.
+FINAL ANSWER: ([]){}
+```
 
-## Setup
+## Quick start
 
 ```bash
 pip install -r requirements.txt
+# GPU: pip install torch --index-url https://download.pytorch.org/whl/cu118
+# Unsloth: pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+
+python generator.py              # conversation.jsonl (default ~60k samples)
+python check_dataset_seq_len.py  # set MAX_LENGTH in Train.py from output
+python Train.py                  # LoRA → results/ and results_merged/
+python inference.py              # edit SEQUENCE in file to probe
 ```
 
-**GPU (PyTorch):** `pip install torch --index-url https://download.pytorch.org/whl/cu118`
+## Project layout
 
-**Unsloth (latest):** `pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"`
+| File | Role |
+|------|------|
+| `generator.py` | JSONL with user/assistant turns and reasoning |
+| `Train.py` | LoRA fine-tune [DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-1.5B) |
+| `inference.py` | Run merged model on custom prefixes |
+| `check_dataset_seq_len.py` | Token-length stats for `MAX_LENGTH` |
+| `conversation.jsonl` | Generated training data |
 
-## Dataset
+## Training defaults
 
-```bash
-python generator.py
-```
+- ~60k samples → ~57k train / ~3k eval
+- 2 epochs, LoRA r=64, effective batch 384
+- LR 6e-6, warmup 25%, `max_grad_norm=0.5`
+- Weighted loss on final-answer tokens (5×)
 
-Creates `conversation.jsonl` with reasoning + final answer per sample. Default 60k samples (edit loop in `generator.py` to change).
+Outputs: `results/` (adapter), `results_merged/` (full model), `results/training_loss.png`.
 
-Before training, run `python check_dataset_seq_len.py` and set `MAX_LENGTH` in `Train.py` to at least the reported max.
+## Why Dyck for ML interviews
 
-## Training
+Stack discipline is **computable ground truth**. You can measure exact match on the sequence, audit reasoning steps, and discuss data scaling without benchmark contamination debates.
 
-```bash
-python Train.py
-```
+## License
 
-**Config:** 60k data → ~57k train / ~3k eval; 2 epochs; LoRA r=64; effective batch 384; LR 6e-6, warmup 25%, max_grad_norm=0.5; weighted loss on "FINAL ANSWER" tokens (5×).
-
-**Outputs:** `results/` (adapter), `results_merged/` (merged model for inference), `results/training_loss.png`. If loss spiked, use the checkpoint with lowest eval_loss from the plot.
-
-## Inference
-
-```bash
-python inference.py
-```
-
-Loads merged model (or set `MODEL_ID` in `inference.py`). Edit `SEQUENCE` to try other inputs. Output format: dataset style (`# Thought N:`, `# Step k: add 'X'.`, `FINAL ANSWER: <sequence>`).
-
-## Model
-
-**Base:** [DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/unsloth/DeepSeek-R1-Distill-Qwen-1.5B). Fine-tuned adapter in `results/`, merged in `results_merged/`.
+MIT © 2026 Akash Dutta
